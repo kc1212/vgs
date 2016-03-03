@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -20,8 +21,7 @@ func InitNodes(n int) []Node {
 func (n *Node) startJob(job Job) {
 	// this condition should not happen
 	if n.running || job.status != Waiting {
-		// TODO panic or return error?
-		panic(fmt.Sprintf("Cannot start job %v on node %v!\n", job, *n))
+		log.Fatal(fmt.Sprintf("Cannot start job %v on node %v!\n", job, *n))
 	}
 	n.startTime = time.Now().Unix()
 	n.job = job

@@ -1,9 +1,11 @@
 package model
 
-import "log"
-import "net"
-import "net/http"
-import "net/rpc"
+import (
+	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+)
 
 type ResMan struct {
 	nodes []Node

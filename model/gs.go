@@ -1,8 +1,10 @@
 package model
 
-import "log"
-import "net/rpc"
-import "math/rand"
+import (
+	"log"
+	"math/rand"
+	"net/rpc"
+)
 
 // the grid scheduler
 type GS struct {
