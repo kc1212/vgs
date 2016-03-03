@@ -1,19 +1,50 @@
 package model
 
-import "fmt"
+import "log"
+import "net"
+import "net/http"
+import "net/rpc"
 
 type ResMan struct {
 	nodes []Node
 	jobs  []Job
 }
 
-func InitResMan(n int) ResMan {
-	nodes := InitNodes(n)
-	rm := ResMan{nodes, *new([]Job)}
-	return rm
+type ResManArgs struct {
+	Test int // TODO change this an actual job
 }
 
-func (rm *ResMan) run() {
+func StartResMan(n int, port string) {
+	nodes := InitNodes(n)
+	rm := ResMan{nodes, *new([]Job)}
+	rm.startRPC(port)
+	rm.startMainLoop()
+}
+
+// the RPC function
+func (rm *ResMan) AddJob(args *ResManArgs, reply *int) error {
+	log.Printf("Message received %v\n", *args)
+	// rm.jobs = append(rm.jobs, args.JobArg)
+	*reply = 1
+	return nil
+}
+
+func (rm *ResMan) startRPC(port string) {
+	// initialise RPC
+	log.Printf("Initialising RPC on port %v\n", port)
+	rpc.Register(rm)
+	rpc.HandleHTTP()
+	l, e := net.Listen("tcp", port)
+	if e != nil {
+		log.Fatal("listen error:", e)
+	}
+	go http.Serve(l, nil)
+}
+
+func (rm *ResMan) startMainLoop() {
+	log.Printf("Startin main loop\n")
+	for {
+	}
 	// TODO receive messages from GS
 	// TODO update status of nodes
 	// TODO schedule jobs
@@ -47,6 +78,6 @@ func (rm *ResMan) assign(idx int) {
 	rm.jobs = rm.jobs[1:] // remove the very first job
 }
 
-func (rm ResMan) PrintStatus() {
-	fmt.Printf("ResMan: %v jobs and %v nodes\n", len(rm.jobs), len(rm.nodes))
+func (rm ResMan) logStatus() {
+	log.Printf("ResMan: %v jobs and %v nodes\n", len(rm.jobs), len(rm.nodes))
 }
