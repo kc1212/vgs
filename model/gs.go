@@ -6,30 +6,26 @@ import (
 	"net/http"
 	"net/rpc"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 )
 
 // the grid scheduler
 type GS struct {
-	id              int
-	addr            string
-	basePort        int
-	others          []string // other GS's
-	clusters        []string
-	leader          string // the lead GS
-	jobs            []Job
-	runningElection bool
-	electionRWLock  sync.RWMutex
+	id          int
+	addr        string
+	basePort    int
+	others      []string // other GS's
+	clusters    []string
+	leader      string // the lead GS
+	jobs        []Job
+	runningElec ElectionFlag
 }
 
-type MsgType int
-
-const (
-	ElectionMsg MsgType = iota
-	CoordinateMsg
-)
+type ElectionFlag struct {
+	isRunning bool
+	mutex     sync.RWMutex
+}
 
 type GSArgs struct {
 	SenderId   int
@@ -37,9 +33,21 @@ type GSArgs struct {
 	SenderType MsgType
 }
 
+func (ef *ElectionFlag) set(f bool) {
+	defer ef.mutex.Unlock()
+	ef.mutex.Lock()
+	ef.isRunning = f
+}
+
+func (ef *ElectionFlag) get() bool {
+	defer ef.mutex.RUnlock()
+	ef.mutex.RLock()
+	return ef.isRunning
+}
+
 func InitGS(id int, n int, basePort int, prefix string) GS {
 	addr := prefix + strconv.Itoa(basePort+id)
-	// TODO read from config file or have bootstrapper
+	// TODO read from config file or have bootstrap/discovery server
 	var otherGS []string
 	for i := 0; i < n; i++ {
 		if i != id {
@@ -50,32 +58,16 @@ func InitGS(id int, n int, basePort int, prefix string) GS {
 	var clusters []string
 	leader := ""
 	jobs := InitJobs(0) // start with zero jobs
-	return GS{id, addr, basePort, otherGS, clusters, leader, jobs, false, sync.RWMutex{}}
+	return GS{id, addr, basePort, otherGS, clusters, leader, jobs, ElectionFlag{}}
 }
 
 // TODO how should the user submit request
 // via REST API or RPC call from a client?
 
-// TODO only one cluster at the moment, need to generalise
-// runs the main loop
 func (gs *GS) Run() {
 	// initialise GS as RPC server
-	gs.startRPC()
+	go gs.startRPC()
 
-	// initialise RPC for calling cluster prodecures
-	// remote, err := rpc.DialHTTP("tcp", "localhost:1234")
-	// if err != nil {
-	// 	log.Fatal("dialing:", err)
-	// }
-
-	// args := ResManArgs{42}
-	// var reply int
-	// err = remote.Call("ResMan.AddJob", args, &reply)
-	// if err != nil {
-	// 	log.Fatal("rm error:", err)
-	// }
-
-	// // initialise RPC for receiving requests
 	// for {
 	// 	// TODO get all the clusters
 	// 	// TODO arrange them in loaded order
@@ -83,35 +75,49 @@ func (gs *GS) Run() {
 	// }
 }
 
-func (gs *GS) sendMsgToGS(otherId int, args GSArgs) error {
-	log.Printf("Sending message to %v\n", gs.others[otherId])
-	remote, e := rpc.DialHTTP("tcp", gs.others[otherId])
+func addSendJobToRM(addr string, args ResManArgs) (int, error) {
+	log.Printf("Sending job to %v\n", addr)
+	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", gs.others[otherId])
-		return e
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return -1, e
+	}
+	var reply int
+	err := remote.Call("ResMan.AddJob", args, &reply)
+	if err != nil {
+		log.Printf("Node %v not online (ResMan.AddJob)\n", addr)
+		return -1, e
+	}
+	return reply, nil
+}
+
+func sendMsgToGS(addr string, args GSArgs) (int, error) {
+	log.Printf("Sending message to %v\n", addr)
+	remote, e := rpc.DialHTTP("tcp", addr)
+	if e != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return -1, e
 	}
 	var reply int
 	if e := remote.Call("GS.RecvMsg", args, &reply); e != nil {
-		log.Printf("Node %v not online (RecvMsg)\n", gs.others[otherId])
-		return e
+		log.Printf("Node %v not online (RecvMsg)\n", addr)
+		return -1, e
 	}
-	return nil
+	return reply, nil
 }
 
 // send messages to procs with higher id
 func (gs *GS) Elect() {
 	defer func() {
-		gs.runningElection = false
-		gs.electionRWLock.Unlock()
+		gs.runningElec.set(false)
 	}()
-	gs.electionRWLock.Lock()
-	gs.runningElection = true
+	gs.runningElec.set(true)
 	oks := 0
 	for i := range gs.others {
 		if idFromAddr(gs.others[i], gs.basePort) < gs.id {
 			continue // do nothing to lower ids
 		}
-		e := gs.sendMsgToGS(i, GSArgs{gs.id, gs.addr, ElectionMsg})
+		_, e := sendMsgToGS(gs.others[i], GSArgs{gs.id, gs.addr, ElectionMsg})
 		if e != nil {
 			continue
 		}
@@ -124,7 +130,7 @@ func (gs *GS) Elect() {
 		log.Printf("I'm the leader (%v).\n", gs.addr)
 		for i := range gs.others {
 			args := GSArgs{gs.id, gs.addr, CoordinateMsg}
-			e := gs.sendMsgToGS(i, args)
+			_, e := sendMsgToGS(gs.others[i], args)
 			if e != nil {
 				// ok to fail the send, because nodes might be done
 				continue
@@ -132,16 +138,9 @@ func (gs *GS) Elect() {
 		}
 	}
 
-	time.Sleep(time.Second * 3)
-}
-
-func idFromAddr(addr string, basePort int) int {
-	tmp := strings.Split(addr, ":")
-	port, e := strconv.Atoi(tmp[len(tmp)-1])
-	if e != nil {
-		log.Fatal("idFromAddr failed", e)
-	}
-	return port - basePort
+	// artificially make the election last longer so that multiple messages
+	// requests won't initialise multiple election runs
+	time.Sleep(time.Second)
 }
 
 func (gs *GS) RecvMsg(args *GSArgs, reply *int) error {
@@ -151,11 +150,9 @@ func (gs *GS) RecvMsg(args *GSArgs, reply *int) error {
 		log.Printf("Leader set to %v\n", gs.leader)
 	} else if args.SenderType == ElectionMsg {
 		// don't start a new election if one is already running
-		gs.electionRWLock.RLock()
-		if !gs.runningElection {
+		if !gs.runningElec.get() {
 			go gs.Elect()
 		}
-		gs.electionRWLock.RUnlock()
 	}
 	*reply = 1
 	return nil
@@ -168,7 +165,7 @@ func (gs *GS) startRPC() {
 	rpc.HandleHTTP()
 	l, e := net.Listen("tcp", gs.addr)
 	if e != nil {
-		log.Fatal("listen error:", e)
+		log.Panic("startRPC failed", e)
 	}
-	go http.Serve(l, nil)
+	http.Serve(l, nil)
 }
