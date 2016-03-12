@@ -65,14 +65,14 @@ func InitGS(id int, n int, basePort int, prefix string) GS {
 // via REST API or RPC call from a client?
 
 func (gs *GS) Run() {
-	// initialise GS as RPC server
 	go gs.startRPC()
+	go gs.pollLeader()
 
-	// for {
-	// 	// TODO get all the clusters
-	// 	// TODO arrange them in loaded order
-	// 	// TODO allocate *all* jobs
-	// }
+	for {
+		// TODO get all the clusters
+		// TODO arrange them in loaded order
+		// TODO allocate *all* jobs
+	}
 }
 
 func addSendJobToRM(addr string, args ResManArgs) (int, error) {
@@ -82,13 +82,12 @@ func addSendJobToRM(addr string, args ResManArgs) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return -1, e
 	}
-	var reply int
+	reply := -1
 	err := remote.Call("ResMan.AddJob", args, &reply)
 	if err != nil {
 		log.Printf("Node %v not online (ResMan.AddJob)\n", addr)
-		return -1, e
 	}
-	return reply, nil
+	return reply, remote.Close()
 }
 
 func sendMsgToGS(addr string, args GSArgs) (int, error) {
@@ -98,12 +97,11 @@ func sendMsgToGS(addr string, args GSArgs) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return -1, e
 	}
-	var reply int
+	reply := -1
 	if e := remote.Call("GS.RecvMsg", args, &reply); e != nil {
 		log.Printf("Node %v not online (RecvMsg)\n", addr)
-		return -1, e
 	}
-	return reply, nil
+	return reply, remote.Close()
 }
 
 // send messages to procs with higher id
@@ -158,8 +156,23 @@ func (gs *GS) RecvMsg(args *GSArgs, reply *int) error {
 	return nil
 }
 
+func (gs *GS) pollLeader() {
+	for {
+		time.Sleep(time.Second)
+		if gs.addr == gs.leader {
+			continue
+		}
+		remote, e := rpc.DialHTTP("tcp", gs.leader) // TODO should we have a mutex on `gs.leader?`
+		if e != nil {
+			log.Printf("Leader %v not online (DialHTTP), initialising election.\n", gs.leader)
+			gs.Elect()
+		} else {
+			remote.Close()
+		}
+	}
+}
+
 func (gs *GS) startRPC() {
-	// initialise RPC
 	log.Printf("Initialising RPC on addr %v\n", gs.addr)
 	rpc.Register(gs)
 	rpc.HandleHTTP()
@@ -167,5 +180,6 @@ func (gs *GS) startRPC() {
 	if e != nil {
 		log.Panic("startRPC failed", e)
 	}
+	// the Serve function runs until death
 	http.Serve(l, nil)
 }

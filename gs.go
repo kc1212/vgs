@@ -2,7 +2,6 @@ package main
 
 import "log"
 import "os"
-import "time"
 import "strconv"
 import "github.com/kc1212/vgs/model"
 
@@ -19,10 +18,4 @@ func main() {
 
 	gs := model.InitGS(id, n, 3000, "localhost:")
 	gs.Run()
-
-	time.Sleep(time.Second * 5)
-
-	gs.Elect()
-
-	time.Sleep(time.Second * 5)
 }
