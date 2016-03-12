@@ -6,21 +6,35 @@ import (
 	"net/http"
 	"net/rpc"
 	"strconv"
+	"strings"
+	"sync"
+	"time"
 )
 
 // the grid scheduler
 type GS struct {
-	id       int
-	addr     string
-	others   []string // other GS's
-	clusters []string
-	leader   string // the lead GS
-	jobs     []Job
+	id              int
+	addr            string
+	basePort        int
+	others          []string // other GS's
+	clusters        []string
+	leader          string // the lead GS
+	jobs            []Job
+	runningElection bool
+	electionRWLock  sync.RWMutex
 }
 
+type MsgType int
+
+const (
+	ElectionMsg MsgType = iota
+	CoordinateMsg
+)
+
 type GSArgs struct {
-	SenderId int
-	MsgType  int // TODO
+	SenderId   int
+	SenderAddr string
+	SenderType MsgType
 }
 
 func InitGS(id int, n int, basePort int, prefix string) GS {
@@ -32,10 +46,11 @@ func InitGS(id int, n int, basePort int, prefix string) GS {
 			otherGS = append(otherGS, prefix+strconv.Itoa(basePort+i))
 		}
 	}
-	var clusters []string // TODO see above
+	// TODO see above
+	var clusters []string
 	leader := ""
 	jobs := InitJobs(0) // start with zero jobs
-	return GS{id, addr, otherGS, clusters, leader, jobs}
+	return GS{id, addr, basePort, otherGS, clusters, leader, jobs, false, sync.RWMutex{}}
 }
 
 // TODO how should the user submit request
@@ -68,24 +83,80 @@ func (gs *GS) Run() {
 	// }
 }
 
+func (gs *GS) sendMsgToGS(otherId int, args GSArgs) error {
+	log.Printf("Sending message to %v\n", gs.others[otherId])
+	remote, e := rpc.DialHTTP("tcp", gs.others[otherId])
+	if e != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", gs.others[otherId])
+		return e
+	}
+	var reply int
+	if e := remote.Call("GS.RecvMsg", args, &reply); e != nil {
+		log.Printf("Node %v not online (RecvMsg)\n", gs.others[otherId])
+		return e
+	}
+	return nil
+}
+
 // send messages to procs with higher id
 func (gs *GS) Elect() {
-	// TODO maybe keep tcp connection open?
+	defer func() {
+		gs.runningElection = false
+		gs.electionRWLock.Unlock()
+	}()
+	gs.electionRWLock.Lock()
+	gs.runningElection = true
+	oks := 0
 	for i := range gs.others {
-		remote, e := rpc.DialHTTP("tcp", gs.others[i])
-		if e != nil {
-			log.Fatal("Dialing failed: ", e)
+		if idFromAddr(gs.others[i], gs.basePort) < gs.id {
+			continue // do nothing to lower ids
 		}
-		args := GSArgs{gs.id, 0}
-		var reply int
-		if e := remote.Call("GS.RecvMsg", args, &reply); e != nil {
-			log.Fatal("GS.RecvMsg failed: ", e)
+		e := gs.sendMsgToGS(i, GSArgs{gs.id, gs.addr, ElectionMsg})
+		if e != nil {
+			continue
+		}
+		oks++
+	}
+
+	// if no responses, then set the node itself as leader, and tell others
+	gs.leader = gs.addr
+	if oks == 0 {
+		log.Printf("I'm the leader (%v).\n", gs.addr)
+		for i := range gs.others {
+			args := GSArgs{gs.id, gs.addr, CoordinateMsg}
+			e := gs.sendMsgToGS(i, args)
+			if e != nil {
+				// ok to fail the send, because nodes might be done
+				continue
+			}
 		}
 	}
+
+	time.Sleep(time.Second * 3)
+}
+
+func idFromAddr(addr string, basePort int) int {
+	tmp := strings.Split(addr, ":")
+	port, e := strconv.Atoi(tmp[len(tmp)-1])
+	if e != nil {
+		log.Fatal("idFromAddr failed", e)
+	}
+	return port - basePort
 }
 
 func (gs *GS) RecvMsg(args *GSArgs, reply *int) error {
 	log.Printf("Msg received %v\n", *args)
+	if args.SenderType == CoordinateMsg {
+		gs.leader = args.SenderAddr
+		log.Printf("Leader set to %v\n", gs.leader)
+	} else if args.SenderType == ElectionMsg {
+		// don't start a new election if one is already running
+		gs.electionRWLock.RLock()
+		if !gs.runningElection {
+			go gs.Elect()
+		}
+		gs.electionRWLock.RUnlock()
+	}
 	*reply = 1
 	return nil
 }
