@@ -16,6 +16,6 @@ func main() {
 		log.Fatalf("n argument incorrect")
 	}
 
-	gs := model.InitGS(id, n, 3000, "localhost:")
+	gs := model.InitGridSdr(id, n, 3000, "localhost:")
 	gs.Run()
 }
