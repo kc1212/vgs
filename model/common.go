@@ -11,6 +11,7 @@ type MsgType int
 const (
 	ElectionMsg MsgType = iota
 	CoordinateMsg
+	CritSectionMsg
 )
 
 func idFromAddr(addr string, basePort int) int {
