@@ -44,7 +44,7 @@ type Job struct {
 * Once the job is completed, the RM notifies a random GS that is online about its completion, and the GS should delete that job.
 
 ## Diagram
-![id](https://raw.githubusercontent.com/Saminobi/publicstuff/master/DS_project2.png>)
+![Diagram](/DS_Diagram.png?raw=true "Diagram")
 
 ## Implementation
 * TODO
