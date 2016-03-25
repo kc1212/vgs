@@ -16,6 +16,8 @@ const (
 	SyncResp
 )
 
+type Task func() (interface{}, error)
+
 type SyncedFlag struct {
 	sync.RWMutex
 	isRunning bool
