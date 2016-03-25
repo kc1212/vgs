@@ -128,7 +128,7 @@ func (gs *GridSdr) obtainCritSection() int {
 	successes := 0
 	randTime := rand.Int63()
 	for _, o := range gs.others {
-		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, SyncReq, randTime})
+		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, MutexReq, randTime})
 		if e == nil {
 			successes++
 		}
@@ -231,11 +231,11 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 		if !gs.inElection.get() {
 			go gs.elect(true)
 		}
-	} else if args.Type == SyncReq {
-		// NOTE this is assuming new SyncReq messages cannot arrive before
-		// the node finish processing the previous SyncReq message
+	} else if args.Type == MutexReq {
+		// NOTE this is assuming new MutexReq messages cannot arrive before
+		// the node finish processing the previous MutexReq message
 		go gs.respCritSection(args.Addr, args.Clock)
-	} else if args.Type == SyncResp {
+	} else if args.Type == MutexResp {
 		gs.mutexRespChan <- 0
 	}
 	return nil
@@ -287,7 +287,7 @@ func (gs *GridSdr) respCritSection(addr string, clock int64) {
 	}{
 		clock,
 		func() (interface{}, error) {
-			sendMsgToGS(addr, GridSdrArgs{gs.id, gs.addr, SyncResp, 0})
+			sendMsgToGS(addr, GridSdrArgs{gs.id, gs.addr, MutexResp, 0})
 			return 0, nil
 		}}
 }
