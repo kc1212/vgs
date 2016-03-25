@@ -4,6 +4,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 type MsgType int
@@ -11,8 +12,26 @@ type MsgType int
 const (
 	ElectionMsg MsgType = iota
 	CoordinateMsg
-	CritSectionMsg
+	SyncReq
+	SyncResp
 )
+
+type SyncedFlag struct {
+	sync.RWMutex
+	isRunning bool
+}
+
+func (ef *SyncedFlag) set(f bool) {
+	defer ef.Unlock()
+	ef.Lock()
+	ef.isRunning = f
+}
+
+func (ef *SyncedFlag) get() bool {
+	defer ef.RUnlock()
+	ef.RLock()
+	return ef.isRunning
+}
 
 func idFromAddr(addr string, basePort int) int {
 	tmp := strings.Split(addr, ":")
