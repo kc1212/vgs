@@ -20,26 +20,12 @@ type GridSdr struct {
 	leader       string // the lead GridSdr
 	jobs         []Job
 	electionFlag ElectionFlag
-	ricartResps  RicartResps
+	syncChan     chan int
 }
 
-// TODO is it better to use a timer instead of a flag?
-// i.e. check the number of seconds before last election started
 type ElectionFlag struct {
 	sync.RWMutex
 	isRunning bool
-}
-
-type RicartResps struct {
-	sync.RWMutex
-	resps map[string]int
-}
-
-type GSArgs struct {
-	Id    int
-	Addr  string
-	Type  MsgType
-	Clock int64
 }
 
 func (ef *ElectionFlag) set(f bool) {
@@ -54,17 +40,12 @@ func (ef *ElectionFlag) get() bool {
 	return ef.isRunning
 }
 
-func (rr *RicartResps) set(s string, x int) {
-	defer rr.Unlock()
-	rr.Lock()
-	rr.resps[s] = x
+type GSArgs struct {
+	Id    int
+	Addr  string
+	Type  MsgType
+	Clock int64
 }
-
-// func (rr *RicartResps) get(s string) int {
-// 	defer rr.RUnlock()
-// 	rr.RLock()
-// 	return rr.resps[s]
-// }
 
 func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 	addr := prefix + strconv.Itoa(basePort+id)
@@ -79,7 +60,8 @@ func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 	var clusters []string
 	leader := ""
 	jobs := InitJobs(0) // start with zero jobs
-	return GridSdr{id, addr, basePort, otherGS, clusters, leader, jobs, ElectionFlag{}, RicartResps{}}
+	return GridSdr{id, addr, basePort, otherGS, clusters, leader, jobs,
+		ElectionFlag{}, make(chan int, n-1)}
 }
 
 // TODO how should the user submit request
@@ -128,33 +110,27 @@ func sendMsgToGS(addr string, args GSArgs) (int, error) {
 // send the critical section request and then wait for responses until some timeout
 // don't wait for response for nodes that are already offline
 func (gs *GridSdr) reqCritSection() {
-	// reset response map, no need mutex because this function shouldn't be called when waiting for response
-	gs.ricartResps.resps = make(map[string]int)
+	successes := 0
 	for _, o := range gs.others {
 		_, e := sendMsgToGS(o, GSArgs{gs.id, gs.addr, CritSectionMsg, 0}) // TODO add time
 		if e == nil {
-			// 1 represents we need to wait for the response
-			gs.ricartResps.set(o, 1)
+			successes++
 		}
 	}
 
-	// wait until ricartResps is populated or time out of 1 second
+	// wait until others has written to syncChan or time out
 	t := time.Now().Add(time.Second)
 	for t.After(time.Now()) {
-		gs.ricartResps.RLock()
-		all2 := true
-		rs := gs.ricartResps.resps
-		for k := range rs {
-			if rs[k] != 2 {
-				all2 = false
-				break
-			}
-		}
-		gs.ricartResps.RUnlock()
-		if all2 {
+		if len(gs.syncChan) >= successes {
 			break
 		}
 		time.Sleep(time.Microsecond)
+	}
+
+	// empty the channel
+	// NOTE: nodes following the protocol shouldn't send more messages
+	for len(gs.syncChan) > 0 {
+		<-gs.syncChan
 	}
 
 	// here we're in critical section
@@ -166,6 +142,7 @@ func (gs *GridSdr) elect() {
 		gs.electionFlag.set(false)
 	}()
 	gs.electionFlag.set(true)
+
 	oks := 0
 	for _, o := range gs.others {
 		if idFromAddr(o, gs.basePort) < gs.id {
@@ -180,8 +157,8 @@ func (gs *GridSdr) elect() {
 
 	// if no responses, then set the node itself as leader, and tell others
 	gs.leader = gs.addr
+	log.Printf("I'm the leader (%v).\n", gs.leader)
 	if oks == 0 {
-		log.Printf("I'm the leader (%v).\n", gs.addr)
 		for i := range gs.others {
 			args := GSArgs{gs.id, gs.addr, CoordinateMsg, 0} // TODO add time
 			_, e := sendMsgToGS(gs.others[i], args)
