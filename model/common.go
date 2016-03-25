@@ -12,8 +12,8 @@ type MsgType int
 const (
 	ElectionMsg MsgType = iota
 	CoordinateMsg
-	SyncReq
-	SyncResp
+	MutexReq
+	MutexResp
 )
 
 type Task func() (interface{}, error)
