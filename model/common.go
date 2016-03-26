@@ -31,16 +31,32 @@ type SyncedVal struct {
 	val interface{}
 }
 
-func (ef *SyncedVal) set(x interface{}) {
-	defer ef.Unlock()
-	ef.Lock()
-	ef.val = x
+func (v *SyncedVal) set(x interface{}) {
+	defer v.Unlock()
+	v.Lock()
+	v.val = x
 }
 
-func (ef *SyncedVal) get() interface{} {
-	defer ef.RUnlock()
-	ef.RLock()
-	return ef.val
+func (v *SyncedVal) get() interface{} {
+	defer v.RUnlock()
+	v.RLock()
+	return v.val
+}
+
+func (v *SyncedVal) geti64() int64 {
+	return v.get().(int64)
+}
+
+func (t *SyncedVal) tick() {
+	x := t.get().(int64) + 1
+	t.set(x)
+}
+
+func max64(a int64, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func idFromAddr(addr string, basePort int) int {

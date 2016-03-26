@@ -24,7 +24,8 @@ type GridSdr struct {
 	mutexRespChan chan int
 	mutexReqChan  chan Task
 	mutexState    SyncedVal
-	ts            int64 // time stamp
+	clock         SyncedVal
+	reqClock      int64
 }
 
 type GridSdrArgs struct {
@@ -53,7 +54,8 @@ func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 		make(chan int, n-1),
 		make(chan Task, 100),
 		SyncedVal{val: StateReleased},
-		rand.Int63(), // TODO implement lamport clock
+		SyncedVal{val: 0},
+		0,
 	}
 }
 
@@ -110,6 +112,7 @@ func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
 
 // send the critical section request and then wait for responses until some timeout
 // don't wait for response for nodes that are already offline
+// NOTE: this function isn't designed to be thread safe, it is run periodically in `runTasks`
 func (gs *GridSdr) obtainCritSection() {
 	if gs.mutexState.get().(MutexState) != StateReleased {
 		log.Panicf("Should not be in CS, state: %v\n", gs)
@@ -120,14 +123,15 @@ func (gs *GridSdr) obtainCritSection() {
 		<-gs.mutexRespChan
 	}
 
+	gs.clock.tick()
 	successes := 0
-	gs.ts = rand.Int63() // TODO implement Lamport clock
 	for _, o := range gs.others {
-		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, MutexReq, gs.ts})
+		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, MutexReq, gs.clock.geti64()})
 		if e == nil {
 			successes++
 		}
 	}
+	gs.reqClock = gs.clock.geti64()
 
 	// wait until others has written to mutexRespChan or time out (2s)
 	t := time.Now().Add(2 * time.Second)
@@ -166,12 +170,13 @@ func (gs *GridSdr) elect(withDelay bool) {
 	}()
 	gs.inElection.set(true)
 
+	gs.clock.tick()
 	oks := 0
 	for _, o := range gs.others {
 		if idFromAddr(o, gs.basePort) < gs.id {
 			continue // do nothing to lower ids
 		}
-		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, ElectionMsg, 0})
+		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, ElectionMsg, gs.clock.geti64()})
 		if e != nil {
 			continue
 		}
@@ -179,11 +184,12 @@ func (gs *GridSdr) elect(withDelay bool) {
 	}
 
 	// if no responses, then set the node itself as leader, and tell others
+	gs.clock.tick()
 	gs.leader = gs.addr
 	log.Printf("I'm the leader (%v).\n", gs.leader)
 	if oks == 0 {
 		for i := range gs.others {
-			args := GridSdrArgs{gs.id, gs.addr, CoordinateMsg, 0}
+			args := GridSdrArgs{gs.id, gs.addr, CoordinateMsg, gs.clock.geti64()}
 			_, e := sendMsgToGS(gs.others[i], args)
 			if e != nil {
 				// ok to fail the send, because nodes might be done
@@ -202,6 +208,7 @@ func (gs *GridSdr) elect(withDelay bool) {
 func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 	log.Printf("Msg received %v\n", *args)
 	*reply = 1
+	gs.clock.set(max64(gs.clock.geti64(), args.Clock) + 1) // update Lamport clock
 	if args.Type == CoordinateMsg {
 		gs.leader = args.Addr
 		log.Printf("Leader set to %v\n", gs.leader)
@@ -211,11 +218,11 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 			go gs.elect(true)
 		}
 	} else if args.Type == MutexReq {
-		// NOTE this is assuming new MutexReq messages cannot arrive before
-		// the node finish processing the previous MutexReq message
-		go gs.respCritSection(args.Addr, args.Clock)
+		go gs.respCritSection(*args)
 	} else if args.Type == MutexResp {
 		gs.mutexRespChan <- 0
+	} else {
+		log.Panic("Invalid message!", args)
 	}
 	return nil
 }
@@ -252,13 +259,18 @@ func (gs *GridSdr) runTasks() {
 	}
 }
 
-func (gs *GridSdr) respCritSection(addr string, clock int64) {
+func (gs *GridSdr) argsIsLater(args GridSdrArgs) bool {
+	return gs.clock.geti64() < args.Clock || (gs.clock.geti64() == args.Clock && gs.id < args.Id)
+}
+
+func (gs *GridSdr) respCritSection(args GridSdrArgs) {
 	resp := func() (interface{}, error) {
-		sendMsgToGS(addr, GridSdrArgs{gs.id, gs.addr, MutexResp, 0})
+		sendMsgToGS(args.Addr, GridSdrArgs{gs.id, gs.addr, MutexResp, gs.reqClock})
 		return 0, nil
 	}
 
-	if st := gs.mutexState.get().(MutexState); st == StateHeld || (st == StateWanted && gs.ts < clock) {
+	st := gs.mutexState.get().(MutexState)
+	if st == StateHeld || (st == StateWanted && gs.argsIsLater(args)) {
 		gs.mutexReqChan <- resp
 	} else {
 		resp()
