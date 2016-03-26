@@ -187,10 +187,10 @@ func (gs *GridSdr) elect() {
 	}
 
 	// if no responses, then set the node itself as leader, and tell others
-	gs.clock.tick()
-	gs.leader = gs.addr
-	log.Printf("I'm the leader (%v).\n", gs.leader)
 	if oks == 0 {
+		gs.clock.tick()
+		gs.leader = gs.addr
+		log.Printf("I'm the leader (%v).\n", gs.leader)
 		for i := range gs.others {
 			args := GridSdrArgs{gs.id, gs.addr, CoordinateMsg, gs.clock.geti64()}
 			_, e := sendMsgToGS(gs.others[i], args)
