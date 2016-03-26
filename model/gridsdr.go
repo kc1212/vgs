@@ -12,22 +12,19 @@ import (
 
 // the grid scheduler
 type GridSdr struct {
-	id              int
-	addr            string
-	basePort        int
-	others          []string // other GridSdr's
-	clusters        []string
-	leader          string // the lead GridSdr
-	jobs            []Job
-	tasks           chan Task // these tasks require CS
-	inElection      SyncedFlag
-	inCritSection   SyncedFlag
-	wantCritSection SyncedFlag
-	mutexRespChan   chan int
-	mutexReqChan    chan struct {
-		int64
-		Task
-	}
+	id            int
+	addr          string
+	basePort      int
+	others        []string // other GridSdr's
+	clusters      []string
+	leader        string // the lead GridSdr
+	jobs          []Job
+	tasks         chan Task // these tasks require CS
+	inElection    SyncedVal
+	mutexRespChan chan int
+	mutexReqChan  chan Task
+	mutexState    SyncedVal
+	ts            int64 // time stamp
 }
 
 type GridSdrArgs struct {
@@ -52,14 +49,12 @@ func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 	return GridSdr{id, addr, basePort, others, clusters, leader,
 		make([]Job, 0),
 		make(chan Task, 100),
-		SyncedFlag{},
-		SyncedFlag{},
-		SyncedFlag{},
+		SyncedVal{val: false},
 		make(chan int, n-1),
-		make(chan struct {
-			int64
-			Task
-		}, 1)}
+		make(chan Task, 100),
+		SyncedVal{val: StateReleased},
+		rand.Int63(), // TODO implement lamport clock
+	}
 }
 
 // TODO how should the user submit request
@@ -115,8 +110,8 @@ func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
 
 // send the critical section request and then wait for responses until some timeout
 // don't wait for response for nodes that are already offline
-func (gs *GridSdr) obtainCritSection() int {
-	if gs.inCritSection.get() {
+func (gs *GridSdr) obtainCritSection() {
+	if gs.mutexState.get().(MutexState) != StateReleased {
 		log.Panicf("Should not be in CS, state: %v\n", gs)
 	}
 
@@ -126,31 +121,17 @@ func (gs *GridSdr) obtainCritSection() int {
 	}
 
 	successes := 0
-	randTime := rand.Int63()
+	gs.ts = rand.Int63() // TODO implement Lamport clock
 	for _, o := range gs.others {
-		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, MutexReq, randTime})
+		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, MutexReq, gs.ts})
 		if e == nil {
 			successes++
 		}
 	}
 
-	// wait until others has written to mutexRespChan or time out
-	t := time.Now().Add(time.Second)
+	// wait until others has written to mutexRespChan or time out (2s)
+	t := time.Now().Add(2 * time.Second)
 	for t.After(time.Now()) {
-		if len(gs.mutexReqChan) > 0 {
-			pair := <-gs.mutexReqChan
-			if pair.int64 == randTime {
-				log.Panic("Very unlucky to have same time stamp!")
-			} else if pair.int64 > randTime {
-				// if another node has higher priority, then respond it and then try again
-				_, e := pair.Task()
-				if e != nil {
-					log.Panic("task failed with", e)
-				}
-				return -1
-			}
-			gs.mutexReqChan <- pair
-		}
 		if len(gs.mutexRespChan) >= successes {
 			break
 		}
@@ -164,16 +145,14 @@ func (gs *GridSdr) obtainCritSection() int {
 	}
 
 	// here we're in critical section
-	gs.inCritSection.set(true)
-
-	return 0
+	gs.mutexState.set(StateHeld)
 }
 
 func (gs *GridSdr) releaseCritSection() {
-	gs.inCritSection.set(false)
-	if len(gs.mutexReqChan) > 0 {
-		pair := <-gs.mutexReqChan
-		_, e := pair.Task()
+	gs.mutexState.set(StateReleased)
+	for len(gs.mutexReqChan) > 0 {
+		resp := <-gs.mutexReqChan
+		_, e := resp()
 		if e != nil {
 			log.Panic("task failed with", e)
 		}
@@ -228,7 +207,7 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 		log.Printf("Leader set to %v\n", gs.leader)
 	} else if args.Type == ElectionMsg {
 		// don't start a new election if one is already running
-		if !gs.inElection.get() {
+		if !gs.inElection.get().(bool) {
 			go gs.elect(true)
 		}
 	} else if args.Type == MutexReq {
@@ -255,10 +234,7 @@ func (gs *GridSdr) runTasks() {
 	for {
 		// acquire CS, run the tasks, run for 1ms at most, then release CS
 		if len(gs.tasks) > 0 {
-			if gs.obtainCritSection() != 0 {
-				// try again later if we failed to obtain CS
-				continue
-			}
+			gs.obtainCritSection()
 			log.Println("In CS!", gs.id)
 			t := time.Now().Add(time.Millisecond)
 			for t.After(time.Now()) && len(gs.tasks) > 0 {
@@ -277,19 +253,16 @@ func (gs *GridSdr) runTasks() {
 }
 
 func (gs *GridSdr) respCritSection(addr string, clock int64) {
-	// wait until task in CS is finished and then write to mutexReqChan
-	for gs.inCritSection.get() {
-		time.Sleep(time.Microsecond)
+	resp := func() (interface{}, error) {
+		sendMsgToGS(addr, GridSdrArgs{gs.id, gs.addr, MutexResp, 0})
+		return 0, nil
 	}
-	gs.mutexReqChan <- struct {
-		int64
-		Task
-	}{
-		clock,
-		func() (interface{}, error) {
-			sendMsgToGS(addr, GridSdrArgs{gs.id, gs.addr, MutexResp, 0})
-			return 0, nil
-		}}
+
+	if st := gs.mutexState.get().(MutexState); st == StateHeld || (st == StateWanted && gs.ts < clock) {
+		gs.mutexReqChan <- resp
+	} else {
+		resp()
+	}
 }
 
 func (gs *GridSdr) pollLeader() {

@@ -16,23 +16,31 @@ const (
 	MutexResp
 )
 
+type MutexState int
+
+const (
+	StateReleased MutexState = iota
+	StateWanted
+	StateHeld
+)
+
 type Task func() (interface{}, error)
 
-type SyncedFlag struct {
+type SyncedVal struct {
 	sync.RWMutex
-	isRunning bool
+	val interface{}
 }
 
-func (ef *SyncedFlag) set(f bool) {
+func (ef *SyncedVal) set(x interface{}) {
 	defer ef.Unlock()
 	ef.Lock()
-	ef.isRunning = f
+	ef.val = x
 }
 
-func (ef *SyncedFlag) get() bool {
+func (ef *SyncedVal) get() interface{} {
 	defer ef.RUnlock()
 	ef.RLock()
-	return ef.isRunning
+	return ef.val
 }
 
 func idFromAddr(addr string, basePort int) int {

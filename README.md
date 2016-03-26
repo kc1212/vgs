@@ -47,7 +47,7 @@ type Job struct {
 ![Diagram](/diagram.png?raw=true "Diagram")
 
 ## Implementation
-* TODO
+* Ricart-Agrawala implementation according to pseudocode of [these](http://www2.imm.dtu.dk/courses/02222/Spring_2011/W9L2/Chapter_12a.pdf) slides.
 
 ## Building and Running
 * TODO
