@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// the grid scheduler
 type GridSdr struct {
 	id            int
 	addr          string
@@ -35,6 +34,7 @@ type GridSdrArgs struct {
 	Clock int64
 }
 
+// InitGridSdr creates a grid scheduler.
 func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 	addr := prefix + strconv.Itoa(basePort+id)
 	// TODO read from config file or have bootstrap/discovery server
@@ -54,14 +54,12 @@ func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 		make(chan int, n-1),
 		make(chan Task, 100),
 		SyncedVal{val: StateReleased},
-		SyncedVal{val: 0},
+		SyncedVal{val: int64(0)},
 		0,
 	}
 }
 
-// TODO how should the user submit request
-// via REST API or RPC call from a client?
-
+// Run is the main function for GridSdr, it starts all the services.
 func (gs *GridSdr) Run(genJobs bool) {
 	rand.Seed(time.Now().UTC().UnixNano())
 	go gs.runRPC()
@@ -81,6 +79,7 @@ func (gs *GridSdr) Run(genJobs bool) {
 	}
 }
 
+// addSendJobToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
 func addSendJobToRM(addr string, args ResManArgs) (int, error) {
 	log.Printf("Sending job to %v\n", addr)
 	remote, e := rpc.DialHTTP("tcp", addr)
@@ -96,6 +95,7 @@ func addSendJobToRM(addr string, args ResManArgs) (int, error) {
 	return reply, remote.Close()
 }
 
+// sendMsgToGS creates an RPC connection with another GridSdr and does one remote call on RecvMsg.
 func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
 	log.Printf("Sending message to %v\n", addr)
 	remote, e := rpc.DialHTTP("tcp", addr)
@@ -110,13 +110,15 @@ func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
 	return reply, remote.Close()
 }
 
-// send the critical section request and then wait for responses until some timeout
-// don't wait for response for nodes that are already offline
-// NOTE: this function isn't designed to be thread safe, it is run periodically in `runTasks`
+// obtainCritSection implements most of the Ricart-Agrawala algorithm, it sends the critical section request and then wait for responses until some timeout.
+// Initially we set the mutexState to StateWanted, if the critical section is obtained we set it to StateHeld.
+// NOTE: this function isn't designed to be thread safe, it is run periodically in `runTasks`.
 func (gs *GridSdr) obtainCritSection() {
 	if gs.mutexState.get().(MutexState) != StateReleased {
 		log.Panicf("Should not be in CS, state: %v\n", gs)
 	}
+
+	gs.mutexState.set(StateWanted)
 
 	// empty the channel before starting just in case
 	for len(gs.mutexRespChan) > 0 {
@@ -152,6 +154,7 @@ func (gs *GridSdr) obtainCritSection() {
 	gs.mutexState.set(StateHeld)
 }
 
+// releaseCritSection sets the mutexState to StateReleased and then runs all the queued requests.
 func (gs *GridSdr) releaseCritSection() {
 	gs.mutexState.set(StateReleased)
 	for len(gs.mutexReqChan) > 0 {
@@ -163,8 +166,8 @@ func (gs *GridSdr) releaseCritSection() {
 	}
 }
 
-// send messages to procs with higher id
-func (gs *GridSdr) elect(withDelay bool) {
+// elect implements the Bully algorithm.
+func (gs *GridSdr) elect() {
 	defer func() {
 		gs.inElection.set(false)
 	}()
@@ -200,11 +203,10 @@ func (gs *GridSdr) elect(withDelay bool) {
 
 	// artificially make the election last longer so that multiple messages
 	// requests won't initialise multiple election runs
-	if withDelay {
-		time.Sleep(time.Second)
-	}
+	time.Sleep(time.Second)
 }
 
+// RecvMsg is called remotely, it updates the Lamport clock first and then performs tasks depending on the message type.
 func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 	log.Printf("Msg received %v\n", *args)
 	*reply = 1
@@ -215,7 +217,7 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 	} else if args.Type == ElectionMsg {
 		// don't start a new election if one is already running
 		if !gs.inElection.get().(bool) {
-			go gs.elect(true)
+			go gs.elect()
 		}
 	} else if args.Type == MutexReq {
 		go gs.respCritSection(*args)
@@ -227,6 +229,8 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 	return nil
 }
 
+// AddJob is called by the client to add a job to the tasks queue.
+// NOTE: this does not add the job to the job queue, that is done by `runTasks`.
 func (gs *GridSdr) AddJob(args *GridSdrArgs, reply *int) error {
 	log.Println("Dummy job added to tasks", gs.id)
 	gs.tasks <- func() (interface{}, error) {
@@ -237,6 +241,7 @@ func (gs *GridSdr) AddJob(args *GridSdrArgs, reply *int) error {
 	return nil
 }
 
+// runTasks queries the tasks queue and if there are outstanding tasks it will request for critical and run the tasks.
 func (gs *GridSdr) runTasks() {
 	for {
 		// acquire CS, run the tasks, run for 1ms at most, then release CS
@@ -259,10 +264,12 @@ func (gs *GridSdr) runTasks() {
 	}
 }
 
+// argsIsLater checks whether args has a later Lamport clock, tie break using node ID.
 func (gs *GridSdr) argsIsLater(args GridSdrArgs) bool {
 	return gs.clock.geti64() < args.Clock || (gs.clock.geti64() == args.Clock && gs.id < args.Id)
 }
 
+// respCritSection puts the critical section response into the response queue when it can't respond straight away.
 func (gs *GridSdr) respCritSection(args GridSdrArgs) {
 	resp := func() (interface{}, error) {
 		sendMsgToGS(args.Addr, GridSdrArgs{gs.id, gs.addr, MutexResp, gs.reqClock})
@@ -277,22 +284,27 @@ func (gs *GridSdr) respCritSection(args GridSdrArgs) {
 	}
 }
 
+// pollLeader polls the leader node and initiates the election algorithm is the leader goes offline.
 func (gs *GridSdr) pollLeader() {
 	for {
 		time.Sleep(time.Second)
-		if gs.addr == gs.leader {
-			continue // don't do anything if I'm leader
+
+		// don't do anything if election is running or I'm leader
+		if gs.inElection.get().(bool) || gs.addr == gs.leader {
+			continue
 		}
-		remote, e := rpc.DialHTTP("tcp", gs.leader) // TODO should we have a mutex on `gs.leader?`
+
+		remote, e := rpc.DialHTTP("tcp", gs.leader)
 		if e != nil {
 			log.Printf("Leader %v not online (DialHTTP), initialising election.\n", gs.leader)
-			gs.elect(false)
+			gs.elect()
 		} else {
 			remote.Close()
 		}
 	}
 }
 
+// runRPC registers and runs the RPC server.
 func (gs *GridSdr) runRPC() {
 	log.Printf("Initialising RPC on addr %v\n", gs.addr)
 	rpc.Register(gs)
