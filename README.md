@@ -43,6 +43,9 @@ type Job struct {
 * When a job is received from a GS, the RM must put it into its job queue and process it.
 * Once the job is completed, the RM notifies a random GS that is online about its completion, and the GS should delete that job.
 
+## Diagram
+![Diagram](/DS_Diagram.png?raw=true "Diagram")
+
 ## Implementation
 * TODO
 
