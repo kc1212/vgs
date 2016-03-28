@@ -75,21 +75,21 @@ func (gs *GridSdr) Run(genJobs bool) {
 
 		if genJobs {
 			reply := 0
-			gs.AddJob(nil, &reply)
+			gs.AddJobs(nil, &reply)
 			time.Sleep(time.Second * 1)
 		}
 	}
 }
 
-// addSendJobToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
-func addSendJobToRM(addr string, args ResManArgs) (int, error) {
-	log.Printf("Sending job to %v\n", addr)
+// addJobsToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
+func addJobsToRM(addr string, args ResManArgs) (int, error) {
+	// log.Printf("Sending job to %v\n", addr)
+	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return -1, e
+		return reply, e
 	}
-	reply := -1
 	err := remote.Call("ResMan.AddJob", args, &reply)
 	if err != nil {
 		log.Printf("Node %v not online (ResMan.AddJob)\n", addr)
@@ -99,14 +99,28 @@ func addSendJobToRM(addr string, args ResManArgs) (int, error) {
 
 // sendMsgToGS creates an RPC connection with another GridSdr and does one remote call on RecvMsg.
 func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
-	log.Printf("Sending message to %v\n", addr)
+	// log.Printf("Sending message to %v\n", addr)
+	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return -1, e
+		return reply, e
 	}
-	reply := -1
 	if e := remote.Call("GridSdr.RecvMsg", args, &reply); e != nil {
+		log.Printf("Node %v not online (RecvMsg)\n", addr)
+	}
+	return reply, remote.Close()
+}
+
+func addJobsToGS(addr string, args *[]Job) (int, error) {
+	// log.Printf("Sending message to %v\n", addr)
+	reply := -1
+	remote, e := rpc.DialHTTP("tcp", addr)
+	if e != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return reply, e
+	}
+	if e := remote.Call("GridSdr.RecvJobs", args, &reply); e != nil {
 		log.Printf("Node %v not online (RecvMsg)\n", addr)
 	}
 	return reply, remote.Close()
@@ -182,10 +196,9 @@ func (gs *GridSdr) elect() {
 			continue // do nothing to lower ids
 		}
 		_, e := sendMsgToGS(k, GridSdrArgs{gs.id, gs.addr, ElectionMsg, gs.clock.geti64()})
-		if e != nil {
-			continue
+		if e == nil {
+			oks++
 		}
-		oks++
 	}
 
 	// if no responses, then set the node itself as leader, and tell others
@@ -195,11 +208,7 @@ func (gs *GridSdr) elect() {
 		log.Printf("I'm the leader (%v).\n", gs.leader)
 		for k, _ := range gs.others {
 			args := GridSdrArgs{gs.id, gs.addr, CoordinateMsg, gs.clock.geti64()}
-			_, e := sendMsgToGS(k, args)
-			if e != nil {
-				// ok to fail the send, because nodes might be done
-				continue
-			}
+			sendMsgToGS(k, args) // NOTE: ok to fail the send, because nodes might be done
 		}
 	}
 
@@ -231,14 +240,25 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 	return nil
 }
 
-// AddJob is called by the client to add a job to the tasks queue.
-// NOTE: this does not add the job to the job queue, that is done by `runTasks`.
-func (gs *GridSdr) AddJob(args *GridSdrArgs, reply *int) error {
-	log.Println("Dummy job added to tasks", gs.id)
+// NOTE: this function should not be called by the client, only by `runTasks`.
+func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
+	gs.jobs = append(gs.jobs, (*jobs)...)
+	*reply = 0
+	return nil
+}
+
+// AddJobs is called by the client to add job(s) to the tasks queue.
+// NOTE: this does not add jobs to the jobs queue, that is done by `runTasks`.
+func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
 	gs.tasks <- func() (interface{}, error) {
-		// TODO add proper job
-		log.Println("Finished Dummy job", gs.id)
-		return 0, nil
+		// add jobs to others
+		for k, _ := range gs.others {
+			addJobsToGS(k, jobs) // ok to fail
+		}
+		// add jobs to myself
+		reply := -1
+		e := gs.RecvJobs(jobs, &reply)
+		return reply, e
 	}
 	return nil
 }
