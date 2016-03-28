@@ -1,7 +1,9 @@
 package main
 
-import "fmt"
-import "github.com/kc1212/vgs/model"
+import (
+	"./model"
+	"fmt"
+)
 
 func main() {
 	model.StartResMan(2, ":1234")

@@ -1,10 +1,10 @@
 package model
 
 type Job struct {
-	id       int
-	duration int64
-	history  []string  // possibly improve the type?
-	status   JobStatus // is this necessary?
+	ID       int64 // must be unique
+	Duration int64
+	History  []string  // possibly improve the type?
+	Status   JobStatus // is this necessary?
 }
 
 type JobStatus int
@@ -16,5 +16,5 @@ const (
 )
 
 func (j *Job) appendHistory(x string) {
-	j.history = append(j.history, x)
+	j.History = append(j.History, x)
 }

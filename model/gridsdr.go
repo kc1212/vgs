@@ -107,11 +107,12 @@ func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
 		return reply, e
 	}
 	if e := remote.Call("GridSdr.RecvMsg", args, &reply); e != nil {
-		log.Printf("Node %v not online (RecvMsg)\n", addr)
+		log.Printf("Remote call GridSdr.RecvMsg failed on %v, %v\n", addr, e.Error())
 	}
 	return reply, remote.Close()
 }
 
+// NOTE: this function should only be executed when CS is obtained.
 func addJobsToGS(addr string, args *[]Job) (int, error) {
 	// log.Printf("Sending message to %v\n", addr)
 	reply := -1
@@ -121,7 +122,7 @@ func addJobsToGS(addr string, args *[]Job) (int, error) {
 		return reply, e
 	}
 	if e := remote.Call("GridSdr.RecvJobs", args, &reply); e != nil {
-		log.Printf("Node %v not online (RecvMsg)\n", addr)
+		log.Printf("Remote call GridSdr.RecvJobs failed on %v, %v\n", addr, e.Error())
 	}
 	return reply, remote.Close()
 }
@@ -242,6 +243,7 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 
 // NOTE: this function should not be called by the client, only by `runTasks`.
 func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
+	log.Printf("adding %v\n", *jobs)
 	gs.jobs = append(gs.jobs, (*jobs)...)
 	*reply = 0
 	return nil

@@ -20,19 +20,19 @@ func InitNodes(n int) []Node {
 // note we're just copying the job
 func (n *Node) startJob(job Job) {
 	// this condition should not happen
-	if n.running || job.status != Waiting {
+	if n.running || job.Status != Waiting {
 		log.Fatal(fmt.Sprintf("Cannot start job %v on node %v!\n", job, *n))
 	}
 	n.startTime = time.Now().Unix()
 	n.job = job
-	n.job.status = Running
+	n.job.Status = Running
 	n.running = true
 }
 
 func (n *Node) poll() {
 	now := time.Now().Unix()
-	if n.running && (now-n.startTime) > n.job.duration {
-		n.job.status = Finished
+	if n.running && (now-n.startTime) > n.job.Duration {
+		n.job.Status = Finished
 		n.running = false
 	}
 }

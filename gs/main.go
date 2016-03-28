@@ -1,9 +1,11 @@
 package main
 
-import "log"
-import "os"
-import "strconv"
-import "github.com/kc1212/vgs/model"
+import (
+	"../model"
+	"log"
+	"os"
+	"strconv"
+)
 
 func main() {
 	id, e := strconv.Atoi(os.Args[1])
