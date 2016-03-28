@@ -62,7 +62,7 @@ func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 }
 
 // Run is the main function for GridSdr, it starts all the services.
-func (gs *GridSdr) Run(genJobs bool) {
+func (gs *GridSdr) Run() {
 	rand.Seed(time.Now().UTC().UnixNano())
 	go gs.runRPC()
 	go gs.pollLeader()
@@ -72,12 +72,6 @@ func (gs *GridSdr) Run(genJobs bool) {
 		// TODO get all the clusters
 		// TODO arrange them in loaded order
 		// TODO allocate *all* jobs
-
-		if genJobs {
-			reply := 0
-			gs.AddJobs(nil, &reply)
-			time.Sleep(time.Second * 1)
-		}
 	}
 }
 
@@ -112,6 +106,7 @@ func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
 	return reply, remote.Close()
 }
 
+// addJobsToGS is a remote call that calls `RecvJobs`.
 // NOTE: this function should only be executed when CS is obtained.
 func addJobsToGS(addr string, args *[]Job) (int, error) {
 	// log.Printf("Sending message to %v\n", addr)
@@ -241,7 +236,8 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 	return nil
 }
 
-// NOTE: this function should not be called by the client, only by `runTasks`.
+// RecvJobs appends new jobs into the jobs queue.
+// NOTE: this function should not be called directly by the client, it requires CS.
 func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
 	log.Printf("adding %v\n", *jobs)
 	gs.jobs = append(gs.jobs, (*jobs)...)

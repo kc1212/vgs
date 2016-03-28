@@ -11,6 +11,7 @@ type JobStatus int
 
 const (
 	Waiting JobStatus = iota
+	Submitted
 	Running
 	Finished
 )
