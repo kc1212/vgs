@@ -10,11 +10,12 @@ import (
 	"time"
 )
 
+// GridSdr describes the properties of one grid scheduler
 type GridSdr struct {
 	id            int
 	addr          string
 	basePort      int
-	others        []string // other GridSdr's
+	others        map[string]int // other GridSdr's
 	clusters      []string
 	leader        string // the lead GridSdr
 	jobs          []Job
@@ -27,8 +28,9 @@ type GridSdr struct {
 	reqClock      int64
 }
 
+// GridSdrArgs is the arguments for RPC calls between grid schedulers
 type GridSdrArgs struct {
-	Id    int
+	ID    int
 	Addr  string
 	Type  MsgType
 	Clock int64
@@ -38,10 +40,10 @@ type GridSdrArgs struct {
 func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 	addr := prefix + strconv.Itoa(basePort+id)
 	// TODO read from config file or have bootstrap/discovery server
-	var others []string
+	others := make(map[string]int)
 	for i := 0; i < n; i++ {
 		if i != id {
-			others = append(others, prefix+strconv.Itoa(basePort+i))
+			others[prefix+strconv.Itoa(basePort+i)] = i
 		}
 	}
 	// TODO see above
@@ -127,8 +129,8 @@ func (gs *GridSdr) obtainCritSection() {
 
 	gs.clock.tick()
 	successes := 0
-	for _, o := range gs.others {
-		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, MutexReq, gs.clock.geti64()})
+	for k, _ := range gs.others {
+		_, e := sendMsgToGS(k, GridSdrArgs{gs.id, gs.addr, MutexReq, gs.clock.geti64()})
 		if e == nil {
 			successes++
 		}
@@ -175,11 +177,11 @@ func (gs *GridSdr) elect() {
 
 	gs.clock.tick()
 	oks := 0
-	for _, o := range gs.others {
-		if idFromAddr(o, gs.basePort) < gs.id {
+	for k, v := range gs.others {
+		if v < gs.id {
 			continue // do nothing to lower ids
 		}
-		_, e := sendMsgToGS(o, GridSdrArgs{gs.id, gs.addr, ElectionMsg, gs.clock.geti64()})
+		_, e := sendMsgToGS(k, GridSdrArgs{gs.id, gs.addr, ElectionMsg, gs.clock.geti64()})
 		if e != nil {
 			continue
 		}
@@ -191,9 +193,9 @@ func (gs *GridSdr) elect() {
 		gs.clock.tick()
 		gs.leader = gs.addr
 		log.Printf("I'm the leader (%v).\n", gs.leader)
-		for i := range gs.others {
+		for k, _ := range gs.others {
 			args := GridSdrArgs{gs.id, gs.addr, CoordinateMsg, gs.clock.geti64()}
-			_, e := sendMsgToGS(gs.others[i], args)
+			_, e := sendMsgToGS(k, args)
 			if e != nil {
 				// ok to fail the send, because nodes might be done
 				continue
@@ -266,7 +268,7 @@ func (gs *GridSdr) runTasks() {
 
 // argsIsLater checks whether args has a later Lamport clock, tie break using node ID.
 func (gs *GridSdr) argsIsLater(args GridSdrArgs) bool {
-	return gs.clock.geti64() < args.Clock || (gs.clock.geti64() == args.Clock && gs.id < args.Id)
+	return gs.clock.geti64() < args.Clock || (gs.clock.geti64() == args.Clock && gs.id < args.ID)
 }
 
 // respCritSection puts the critical section response into the response queue when it can't respond straight away.
