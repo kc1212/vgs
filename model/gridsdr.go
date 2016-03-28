@@ -72,6 +72,7 @@ func (gs *GridSdr) Run() {
 		// TODO get all the clusters
 		// TODO arrange them in loaded order
 		// TODO allocate *all* jobs
+		time.Sleep(time.Second)
 	}
 }
 
@@ -93,7 +94,7 @@ func addJobsToRM(addr string, args ResManArgs) (int, error) {
 
 // sendMsgToGS creates an RPC connection with another GridSdr and does one remote call on RecvMsg.
 func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
-	// log.Printf("Sending message to %v\n", addr)
+	log.Printf("Sending message %v to %v\n", args, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
@@ -108,15 +109,15 @@ func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
 
 // addJobsToGS is a remote call that calls `RecvJobs`.
 // NOTE: this function should only be executed when CS is obtained.
-func addJobsToGS(addr string, args *[]Job) (int, error) {
-	// log.Printf("Sending message to %v\n", addr)
+func addJobsToGS(addr string, jobs *[]Job) (int, error) {
+	log.Printf("Sending jobs %v, to %v\n", *jobs, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	if e := remote.Call("GridSdr.RecvJobs", args, &reply); e != nil {
+	if e := remote.Call("GridSdr.RecvJobs", jobs, &reply); e != nil {
 		log.Printf("Remote call GridSdr.RecvJobs failed on %v, %v\n", addr, e.Error())
 	}
 	return reply, remote.Close()
@@ -164,6 +165,7 @@ func (gs *GridSdr) obtainCritSection() {
 
 	// here we're in critical section
 	gs.mutexState.set(StateHeld)
+	log.Println("In CS!", gs.id)
 }
 
 // releaseCritSection sets the mutexState to StateReleased and then runs all the queued requests.
@@ -176,6 +178,7 @@ func (gs *GridSdr) releaseCritSection() {
 			log.Panic("task failed with", e)
 		}
 	}
+	log.Println("Out CS!", gs.id)
 }
 
 // elect implements the Bully algorithm.
@@ -264,10 +267,12 @@ func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
 // runTasks queries the tasks queue and if there are outstanding tasks it will request for critical and run the tasks.
 func (gs *GridSdr) runTasks() {
 	for {
+		// sleep for 100ms
+		time.Sleep(100 * time.Millisecond)
+
 		// acquire CS, run the tasks, run for 1ms at most, then release CS
 		if len(gs.tasks) > 0 {
 			gs.obtainCritSection()
-			log.Println("In CS!", gs.id)
 			t := time.Now().Add(time.Millisecond)
 			for t.After(time.Now()) && len(gs.tasks) > 0 {
 				task := <-gs.tasks
@@ -277,10 +282,7 @@ func (gs *GridSdr) runTasks() {
 				}
 			}
 			gs.releaseCritSection()
-			log.Println("Out CS!", gs.id)
 		}
-		// sleep between 1ms to 500ms
-		time.Sleep(time.Duration(time.Millisecond))
 	}
 }
 
