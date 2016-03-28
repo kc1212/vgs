@@ -1,6 +1,12 @@
 package model
 
 import (
+<<<<<<< HEAD
+=======
+	"log"
+	"strconv"
+	"strings"
+>>>>>>> mutex
 	"sync"
 )
 
@@ -52,6 +58,18 @@ func (t *SyncedVal) tick() {
 func max64(a int64, b int64) int64 {
 	if a > b {
 		return a
+<<<<<<< HEAD
+=======
+	}
+	return b
+}
+
+func idFromAddr(addr string, basePort int) int {
+	tmp := strings.Split(addr, ":")
+	port, e := strconv.Atoi(tmp[len(tmp)-1])
+	if e != nil {
+		log.Panic("idFromAddr failed", e)
+>>>>>>> mutex
 	}
 	return b
 }
