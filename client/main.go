@@ -1,7 +1,6 @@
 package main
 
 import (
-	"../model"
 	"bufio"
 	"flag"
 	"fmt"
@@ -11,6 +10,8 @@ import (
 	"os"
 	"time"
 )
+
+import "github.com/kc1212/vgs/model"
 
 // TODO add interactive option
 func main() {

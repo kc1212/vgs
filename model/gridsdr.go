@@ -20,11 +20,11 @@ type GridSdr struct {
 	leader        string // the lead GridSdr
 	jobs          []Job
 	tasks         chan Task // these tasks require CS
-	inElection    SyncedVal
+	inElection    *SyncedVal
 	mutexRespChan chan int
 	mutexReqChan  chan Task
-	mutexState    SyncedVal
-	clock         SyncedVal
+	mutexState    *SyncedVal
+	clock         *SyncedVal
 	reqClock      int64
 }
 
@@ -52,11 +52,11 @@ func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 	return GridSdr{id, addr, basePort, others, clusters, leader,
 		make([]Job, 0),
 		make(chan Task, 100),
-		SyncedVal{val: false},
+		&SyncedVal{val: false},
 		make(chan int, n-1),
 		make(chan Task, 100),
-		SyncedVal{val: StateReleased},
-		SyncedVal{val: int64(0)},
+		&SyncedVal{val: StateReleased},
+		&SyncedVal{val: int64(0)},
 		0,
 	}
 }
