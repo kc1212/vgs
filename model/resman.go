@@ -8,7 +8,8 @@ import (
 )
 
 type ResMan struct {
-	nodes []Node
+	Node
+	nodes []Worker
 	jobs  []Job
 }
 
@@ -16,9 +17,9 @@ type ResManArgs struct {
 	Test int // TODO change this an actual job
 }
 
-func StartResMan(n int, port string) {
-	nodes := InitNodes(n)
-	rm := ResMan{nodes, *new([]Job)}
+func RunResMan(n int, port string) {
+	nodes := make([]Worker, n)
+	rm := ResMan{Node{}, nodes, *new([]Job)}
 	rm.startRPC(port)
 	rm.startMainLoop()
 }

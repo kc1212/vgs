@@ -7,6 +7,6 @@ import (
 import "github.com/kc1212/vgs/model"
 
 func main() {
-	model.StartResMan(2, ":1234")
+	model.RunResMan(2, ":1234")
 	fmt.Println("test")
 }

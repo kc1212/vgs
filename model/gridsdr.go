@@ -3,8 +3,6 @@ package model
 import (
 	"log"
 	"math/rand"
-	"net"
-	"net/http"
 	"net/rpc"
 	"strconv"
 	"time"
@@ -12,8 +10,7 @@ import (
 
 // GridSdr describes the properties of one grid scheduler
 type GridSdr struct {
-	id            int
-	addr          string
+	Node
 	basePort      int
 	others        map[string]int // other GridSdr's
 	clusters      []string
@@ -49,7 +46,9 @@ func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 	// TODO see above
 	var clusters []string
 	leader := ""
-	return GridSdr{id, addr, basePort, others, clusters, leader,
+	return GridSdr{
+		Node{id, addr},
+		basePort, others, clusters, leader,
 		make([]Job, 0),
 		make(chan Task, 100),
 		&SyncedVal{val: false},
@@ -64,7 +63,7 @@ func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 // Run is the main function for GridSdr, it starts all the services.
 func (gs *GridSdr) Run() {
 	rand.Seed(time.Now().UTC().UnixNano())
-	go gs.runRPC()
+	go RunRPC(gs, gs.addr)
 	go gs.pollLeader()
 	go gs.runTasks()
 
@@ -324,17 +323,4 @@ func (gs *GridSdr) pollLeader() {
 			remote.Close()
 		}
 	}
-}
-
-// runRPC registers and runs the RPC server.
-func (gs *GridSdr) runRPC() {
-	log.Printf("Initialising RPC on addr %v\n", gs.addr)
-	rpc.Register(gs)
-	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", gs.addr)
-	if e != nil {
-		log.Panic("runRPC failed", e)
-	}
-	// the Serve function runs until death
-	http.Serve(l, nil)
 }

@@ -1,6 +1,10 @@
 package model
 
 import (
+	"log"
+	"net"
+	"net/http"
+	"net/rpc"
 	"sync"
 )
 
@@ -20,6 +24,12 @@ const (
 	StateWanted
 	StateHeld
 )
+
+// Node is a generic node
+type Node struct {
+	id   int
+	addr string
+}
 
 type Task func() (interface{}, error)
 
@@ -54,4 +64,17 @@ func max64(a int64, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// runRPC registers and runs the RPC server.
+func RunRPC(s interface{}, addr string) {
+	log.Printf("Initialising RPC on addr %v\n", addr)
+	rpc.Register(s)
+	rpc.HandleHTTP()
+	l, e := net.Listen("tcp", addr)
+	if e != nil {
+		log.Panic("runRPC failed", e)
+	}
+	// the Serve function runs until death
+	http.Serve(l, nil)
 }

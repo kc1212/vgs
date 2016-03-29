@@ -6,22 +6,18 @@ import (
 	"time"
 )
 
-// the compute nodes that does the actual processing
-type Node struct {
+// Worker is a compute nodes that does the actual processing
+type Worker struct {
 	running   bool
 	startTime int64
 	job       Job // should this be nil if job does not exist?
 }
 
-func InitNodes(n int) []Node {
-	return make([]Node, n)
-}
-
 // note we're just copying the job
-func (n *Node) startJob(job Job) {
+func (n *Worker) startJob(job Job) {
 	// this condition should not happen
 	if n.running || job.Status != Waiting {
-		log.Fatal(fmt.Sprintf("Cannot start job %v on node %v!\n", job, *n))
+		log.Fatal(fmt.Sprintf("Cannot start job %v on worker %v!\n", job, *n))
 	}
 	n.startTime = time.Now().Unix()
 	n.job = job
@@ -29,7 +25,7 @@ func (n *Node) startJob(job Job) {
 	n.running = true
 }
 
-func (n *Node) poll() {
+func (n *Worker) poll() {
 	now := time.Now().Unix()
 	if n.running && (now-n.startTime) > n.job.Duration {
 		n.job.Status = Finished
