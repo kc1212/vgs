@@ -19,6 +19,7 @@ type ResManArgs struct {
 
 func RunResMan(n int, port string) {
 	nodes := make([]Worker, n)
+	// TODO make proper Node
 	rm := ResMan{Node{}, nodes, *new([]Job)}
 	rm.startRPC(port)
 	rm.startMainLoop()

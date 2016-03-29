@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/rpc"
 	"sync"
+	"time"
 )
 
 type MsgType int
@@ -27,9 +28,17 @@ const (
 
 // Node is a generic node
 type Node struct {
-	id   int
-	addr string
+	id       int
+	addr     string
+	nodeType NodeType
 }
+
+type NodeType int
+
+const (
+	GSNode NodeType = iota
+	RMNode
+)
 
 type Task func() (interface{}, error)
 
@@ -77,4 +86,32 @@ func RunRPC(s interface{}, addr string) {
 	}
 	// the Serve function runs until death
 	http.Serve(l, nil)
+}
+
+func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply *int) {
+	if e := remote.Call(fn, args, &reply); e != nil {
+		log.Printf("Remote call %v on %v failed, %v\n", fn, args, e.Error())
+	}
+}
+
+func imAlive(nodeType NodeType, addr string, discosrv string) (int, error) {
+	remote, e := rpc.DialHTTP("tcp", discosrv)
+	reply := -1
+	if e != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", discosrv)
+		return reply, e
+	}
+	defer remote.Close()
+
+	for {
+		time.Sleep(10 * time.Second)
+		// TODO check whether discosrv is still online, otherwise redail
+		if nodeType == GSNode {
+			RemoteCallNoFail(remote, "", addr, &reply)
+		} else if nodeType == RMNode {
+			RemoteCallNoFail(remote, "", addr, &reply)
+		} else {
+			log.Panic("Invalid NodeType!")
+		}
+	}
 }

@@ -47,7 +47,7 @@ func InitGridSdr(id int, n int, basePort int, prefix string) GridSdr {
 	var clusters []string
 	leader := ""
 	return GridSdr{
-		Node{id, addr},
+		Node{id, addr, GSNode},
 		basePort, others, clusters, leader,
 		make([]Job, 0),
 		make(chan Task, 100),
@@ -84,10 +84,7 @@ func addJobsToRM(addr string, args ResManArgs) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	err := remote.Call("ResMan.AddJob", args, &reply)
-	if err != nil {
-		log.Printf("Node %v not online (ResMan.AddJob)\n", addr)
-	}
+	remoteCallNoFail(remote, "ResMan.AddJob", args, &reply)
 	return reply, remote.Close()
 }
 
@@ -100,9 +97,7 @@ func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	if e := remote.Call("GridSdr.RecvMsg", args, &reply); e != nil {
-		log.Printf("Remote call GridSdr.RecvMsg failed on %v, %v\n", addr, e.Error())
-	}
+	remoteCallNoFail(remote, "GridSdr.RecvMsg", args, &reply)
 	return reply, remote.Close()
 }
 
@@ -116,9 +111,7 @@ func addJobsToGS(addr string, jobs *[]Job) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	if e := remote.Call("GridSdr.RecvJobs", jobs, &reply); e != nil {
-		log.Printf("Remote call GridSdr.RecvJobs failed on %v, %v\n", addr, e.Error())
-	}
+	remoteCallNoFail(remote, "GridSdr.RecvJobs", jobs, &reply)
 	return reply, remote.Close()
 }
 
