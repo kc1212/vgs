@@ -51,6 +51,17 @@ const (
 * When a job is received from a GS, the RM must put it into its job queue and process it.
 * Once the job is completed, the RM notifies a random GS that is online about its completion, and the GS should delete that job.
 
+### Discovery Server
+* There exist a discovery/bootstrap server that is needed to build the network.
+* It maintains a list of nodes (GS or RM) that are or was online.
+* The discovery server has a static IP address and we assume it cannot crush during the initial bootstrapping process.
+* The discovery server is not needed once the bootstrapping process is completed.
+* When a node, say `X`, comes online, it sends a message to the discovery server of its presence.
+* The discovery server should reply `X` with a list of all the other nodes currently in the system.
+* Upon receiving the list of nodes, `X` sends a message to every other node in the list so that those nodes knows about `X`'s existance.
+* Nodes sends a "I'm alive" message to the discovery server (if it's online) every 10 seconds.
+* If the discovery server fails to receive a "I'm alive" message from some node in 20 seconds, it removes that node from the list.
+
 ## Diagram
 ![Diagram](/diagram.png?raw=true "Diagram")
 
