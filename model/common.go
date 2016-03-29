@@ -94,7 +94,7 @@ func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply *in
 	}
 }
 
-func imAlive(nodeType NodeType, addr string, discosrv string) (int, error) {
+func imAlive(args DiscoSrvArgs, discosrv string) (int, error) {
 	remote, e := rpc.DialHTTP("tcp", discosrv)
 	reply := -1
 	if e != nil {
@@ -106,12 +106,6 @@ func imAlive(nodeType NodeType, addr string, discosrv string) (int, error) {
 	for {
 		time.Sleep(10 * time.Second)
 		// TODO check whether discosrv is still online, otherwise redail
-		if nodeType == GSNode {
-			RemoteCallNoFail(remote, "", addr, &reply)
-		} else if nodeType == RMNode {
-			RemoteCallNoFail(remote, "", addr, &reply)
-		} else {
-			log.Panic("Invalid NodeType!")
-		}
+		RemoteCallNoFail(remote, "DiscoSrv.ImAlive", &args, &reply)
 	}
 }

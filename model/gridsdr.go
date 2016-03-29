@@ -84,7 +84,7 @@ func addJobsToRM(addr string, args ResManArgs) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	remoteCallNoFail(remote, "ResMan.AddJob", args, &reply)
+	RemoteCallNoFail(remote, "ResMan.AddJob", &args, &reply)
 	return reply, remote.Close()
 }
 
@@ -97,7 +97,7 @@ func sendMsgToGS(addr string, args GridSdrArgs) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	remoteCallNoFail(remote, "GridSdr.RecvMsg", args, &reply)
+	RemoteCallNoFail(remote, "GridSdr.RecvMsg", &args, &reply)
 	return reply, remote.Close()
 }
 
@@ -111,7 +111,7 @@ func addJobsToGS(addr string, jobs *[]Job) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	remoteCallNoFail(remote, "GridSdr.RecvJobs", jobs, &reply)
+	RemoteCallNoFail(remote, "GridSdr.RecvJobs", &jobs, &reply)
 	return reply, remote.Close()
 }
 
