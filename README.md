@@ -72,11 +72,7 @@ const (
 * The Bully Algorithm is implemented by following "Distributed Systems - Principals and Paradigms" by Tannenbaum.
 
 ## Building and Running
-* To build individual components, simply go to their respective directory and type `go build`, i.e.
-```
-cd $GOPATH/src/github.com/kc1212/vgs/gs
-go build
-./gs -help
-```
-* Please start the discovery server - `discosrv` first, before starting `gs` or `rm`. This is not a hard requirement, it's just easier than managing config files.
-* User interaction is done through the `client` executable.
+* Type `make` to build everything.
+* Type `make x` to build component `x`, where `x` can be `cli`, `discosrv`, `gridsdr` or `resman`.
+* Please start the discovery server - `discosrv` first, before starting `gridsdr` or `resman`. This is not a hard requirement, it's just easier than managing config files.
+* User interaction is done through the `cli` executable.
