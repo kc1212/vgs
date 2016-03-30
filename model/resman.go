@@ -47,7 +47,7 @@ func (rm *ResMan) startMainLoop() {
 	log.Printf("Startin main loop\n")
 	for {
 	}
-	// TODO receive messages from GS
+	// TODO receive messages from grid scheduler
 	// TODO update status of nodes
 	// TODO schedule jobs
 }

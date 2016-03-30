@@ -15,9 +15,6 @@ const (
 	Finished
 )
 
-func InitJobs(n int) []Job {
-	return make([]Job, n)
-}
 func (j *Job) appendHistory(x string) {
 	j.history = append(j.history, x)
 }
