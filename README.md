@@ -1,4 +1,4 @@
-# Virtual Grid System
+# Virtual Grid System [![Build Status](https://travis-ci.org/kc1212/vgs.svg?branch=master)](https://travis-ci.org/kc1212/vgs)
 
 ## Assumptions
 * We assume the crash failure model, i.e. no Byzantine failure or omission failure.
