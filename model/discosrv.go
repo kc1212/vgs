@@ -1,60 +1,48 @@
 package model
 
 import (
+	"errors"
 	"log"
-	"sync"
 	"time"
 )
 
-type SyncedSet struct {
-	sync.RWMutex
-	set map[string]int64
-}
-
-func (s *SyncedSet) Set(k string, v int64) {
-	s.Lock()
-	defer s.Unlock()
-	s.set[k] = v
-}
-
-func (s *SyncedSet) Delete(k string) bool {
-	s.Lock()
-	defer s.Unlock()
-	_, found := s.set[k]
-	if !found {
-		return false
-	}
-	delete(s.set, k)
-	return true
-}
-
-func (s *SyncedSet) Get(k string) (v int64, ok bool) {
-	s.RLock()
-	defer s.RUnlock()
-	v, ok = s.set[k]
-	return
-}
-
 type DiscoSrv struct {
-	gsSet SyncedSet
-	rmSet SyncedSet
+	gsSet *SyncedSet
+	rmSet *SyncedSet
 }
 
 type DiscoSrvArgs struct {
-	Addr string
-	Type NodeType
+	Addr     string
+	Type     NodeType
+	NeedList bool
 }
 
-func (ds *DiscoSrv) ImAlive(args *DiscoSrvArgs, reply *int) error {
+type DiscoSrvReply struct {
+	GSs   []string
+	RMs   []string
+	Reply int
+}
+
+func (ds *DiscoSrv) ImAlive(args *DiscoSrvArgs, reply *DiscoSrvReply) error {
 	now := time.Now().Unix()
-	*reply = 0
+	reply.Reply = 0
 	if args.Type == GSNode {
 		ds.gsSet.Set(args.Addr, now)
 	} else if args.Type == RMNode {
 		ds.rmSet.Set(args.Addr, now)
 	} else {
-		*reply = 1
-		log.Panic("Invalid NodeType!")
+		reply.Reply = 1
+		return errors.New("Invalid NodeType!")
+	}
+
+	if args.NeedList {
+		ds.gsSet.RLock()
+		reply.GSs = sliceFromMap(ds.gsSet.set)
+		ds.gsSet.RUnlock()
+
+		ds.rmSet.RLock()
+		reply.RMs = sliceFromMap(ds.rmSet.set)
+		ds.rmSet.RUnlock()
 	}
 	return nil
 }
@@ -62,6 +50,7 @@ func (ds *DiscoSrv) ImAlive(args *DiscoSrvArgs, reply *int) error {
 func (ds *DiscoSrv) removeDead() {
 	for {
 		time.Sleep(time.Second)
+
 		threshold := int64(20)
 		t := time.Now().Unix()
 		log.Println("GS: ", ds.gsSet)
@@ -86,7 +75,9 @@ func (ds *DiscoSrv) removeDead() {
 	}
 }
 
-func (ds *DiscoSrv) RunDiscoSrv() {
-	go RunRPC(ds, "localhost:3333")
+func (ds *DiscoSrv) RunDiscoSrv(addr string) {
+	ds.gsSet = &SyncedSet{set: make(map[string]int64)}
+	ds.rmSet = &SyncedSet{set: make(map[string]int64)}
+	go RunRPC(ds, addr)
 	ds.removeDead()
 }
