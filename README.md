@@ -8,7 +8,7 @@
 
 ## Architecture
 ### User
-* The user submits jobs to either GS or RM (RPC or REST?).
+* The user submits jobs to either GS or RM.
 * The request should fail if the job is not accepted so that the user can try again.
 
 ### Grid Scheduler (GS)
@@ -16,6 +16,7 @@
 * There exist a leader GS that runs a greedy scheduling algorithm and sends jobs to RM's.
 * The leader node is elected using the Bully algorithm.
 * Non-leader node should poll the leader to check whether it is online, if the leader crashes then the remaining nodes must run the Bully algorithm again to elect a new leader.
+* We aim to achieve strong consistency.
 * Jobs are replicated between all the GS's, this is achieved via a modified version of Ricart-Agrawala algorithm.
 * If a GS wishes to modify the job queue (add, update or delete), it would request for the critical section. Once it's in the critical section it would broadcast the modification request (using RPC) so that the job queue is consistent across all GS's.
 * The original Ricart-Agrawala algorithm would wait indefinitely if a node crashes and does not respond, we modify the algorithm by introducing a timeout to identify crashes so the algorithm can continue to run. It would be tricky to tune the timeout because the GS's may be on different geographical locations hence different message delays.
@@ -51,6 +52,17 @@ const (
 * When a job is received from a GS, the RM must put it into its job queue and process it.
 * Once the job is completed, the RM notifies a random GS that is online about its completion, and the GS should delete that job.
 
+### Discovery Server
+* There exist a discovery/bootstrap server that is needed to build the network.
+* It maintains a list of nodes (GS or RM) that are or was online.
+* The discovery server has a static IP address and we assume it cannot crush during the initial bootstrapping process.
+* The discovery server is not needed once the bootstrapping process is completed.
+* When a node, say `X`, comes online, it sends a message to the discovery server of its presence.
+* The discovery server should reply `X` with a list of all the other nodes currently in the system.
+* Upon receiving the list of nodes, `X` sends a message to every other node in the list so that those nodes knows about `X`'s existance.
+* Nodes sends a "I'm alive" message to the discovery server (if it's online) every 10 seconds.
+* If the discovery server fails to receive a "I'm alive" message from some node in 20 seconds, it removes that node from the list.
+
 ## Diagram
 ![Diagram](/diagram.png?raw=true "Diagram")
 
@@ -60,4 +72,11 @@ const (
 * The Bully Algorithm is implemented by following "Distributed Systems - Principals and Paradigms" by Tannenbaum.
 
 ## Building and Running
-* TODO
+* To build individual components, simply go to their respective directory and type `go build`, i.e.
+```
+cd $GOPATH/src/github.com/kc1212/vgs/gs
+go build
+./gs -help
+```
+* Please start the discovery server - `discosrv` first, before starting `gs` or `rm`. This is not a hard requirement, it's just easier than managing config files.
+* User interaction is done through the `client` executable.

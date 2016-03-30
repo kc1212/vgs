@@ -1,24 +1,27 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
-	"strconv"
 )
 
 import "github.com/kc1212/vgs/model"
 
 func main() {
-	id, e := strconv.Atoi(os.Args[1])
+	// default addr:port
+	defaultName, e := os.Hostname()
 	if e != nil {
-		log.Fatalf("id argument incorrect")
+		log.Panic("Failed to get hostname")
 	}
+	defaultName = defaultName + ":" + "3000"
 
-	n, e := strconv.Atoi(os.Args[2])
-	if e != nil {
-		log.Fatalf("n argument incorrect")
-	}
+	id := flag.Int("id", 0, "id of the node")
+	name := flag.String("addr", defaultName, "hostname:port for this node")
+	discosrvAddr := flag.String("discosrv", "localhost:3333", "address of discovery server")
 
-	gs := model.InitGridSdr(id, n, 3000, "localhost:")
+	flag.Parse()
+
+	gs := model.InitGridSdr(*id, *name, *discosrvAddr)
 	gs.Run()
 }
