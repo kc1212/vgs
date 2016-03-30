@@ -1,8 +1,11 @@
 package main
 
-import "log"
-import "os"
-import "strconv"
+import (
+	"log"
+	"os"
+	"strconv"
+)
+
 import "github.com/kc1212/vgs/model"
 
 func main() {
@@ -17,5 +20,5 @@ func main() {
 	}
 
 	gs := model.InitGridSdr(id, n, 3000, "localhost:")
-	gs.Run(id+1 == n) // TODO only add jobs on the highest node, for testing
+	gs.Run()
 }

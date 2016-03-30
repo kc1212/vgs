@@ -24,18 +24,26 @@
 * The GS network should function even when all of them fail except one.
 
 ### Job Queue
-The following snippet shows the job queue.
+The following snippet shows a job structure, a job queue is simply a list (slice in Go) of jobs.
 ```
-type JobQueue []Job
 type Job struct {
-    id        int      // or string, must be unique
-    duration  int64    // in seconds
-    history   []string
-    submitted bool
+	ID       int64 // must be unique
+	Duration int64
+	History  []string  // possibly improve the type?
+	Status   JobStatus // is this necessary?
 }
+
+type JobStatus int
+
+const (
+	Waiting JobStatus = iota
+	Submitted
+	Running
+	Finished
+)
 ```
-* The interesting part is `history`, which tracks the sequence of GS and/or RM that the job has passed through.
-* If the last entry in the history is a RM and the `submitted` flag is true, then it would imply that the RM is processing the job, so the current leader should check whether that RM is online otherwise re-schedule the job to another RM.
+* The interesting part is `History`, which tracks the sequence of GS and/or RM that the job has passed through.
+* If the last entry in the history is a RM and the `Status` is `Submitted`, then it would imply that the RM is processing the job, so the current leader should check whether that RM is online otherwise re-schedule the job to another RM.
 * A job is only removed from the queue when the RM announces that the job is completed.
 
 ### Resource Manager (RM)
@@ -46,8 +54,10 @@ type Job struct {
 ## Diagram
 ![Diagram](/diagram.png?raw=true "Diagram")
 
-## Implementation
+## Implementation Notes
+* RPC is used for all forms of communication.
 * Ricart-Agrawala implementation according to pseudocode of [these](http://www2.imm.dtu.dk/courses/02222/Spring_2011/W9L2/Chapter_12a.pdf) slides.
+* The Bully Algorithm is implemented by following "Distributed Systems - Principals and Paradigms" by Tannenbaum.
 
 ## Building and Running
 * TODO
