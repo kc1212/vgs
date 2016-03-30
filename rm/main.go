@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+)
+
 import "github.com/kc1212/vgs/model"
 
 func main() {

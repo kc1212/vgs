@@ -1,9 +1,6 @@
 package model
 
 import (
-	"log"
-	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -57,13 +54,4 @@ func max64(a int64, b int64) int64 {
 		return a
 	}
 	return b
-}
-
-func idFromAddr(addr string, basePort int) int {
-	tmp := strings.Split(addr, ":")
-	port, e := strconv.Atoi(tmp[len(tmp)-1])
-	if e != nil {
-		log.Panic("idFromAddr failed", e)
-	}
-	return port - basePort
 }
