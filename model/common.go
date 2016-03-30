@@ -1,5 +1,8 @@
 package model
 
+//go:generate stringer -type=MsgType
+//go:generate stringer -type=MutexState
+
 import (
 	"log"
 	"net"
