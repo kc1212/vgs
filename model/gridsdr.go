@@ -246,6 +246,7 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 
 	} else if args.Type == GetIDMsg {
 		*reply = gs.id
+		gs.others.Set(args.Addr, int64(args.ID))
 
 	} else {
 		log.Panic("Invalid message!", args)
