@@ -57,7 +57,7 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 	}
 }
 
-// Run is the main function for GridSdr, it starts all the services.
+// Run is the main function for GridSdr, it starts all its services.
 func (gs *GridSdr) Run() {
 	rand.Seed(time.Now().UTC().UnixNano())
 
