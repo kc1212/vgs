@@ -40,7 +40,7 @@ func (rm *ResMan) Run() {
 
 // AddJob RPC call
 func (rm *ResMan) AddJob(args *[]Job, reply *int) error {
-	log.Printf("Message received %v\n", *args)
+	log.Printf("Jobs received %v\n", *args)
 	// rm.jobs = append(rm.jobs, args.JobArg)
 	*reply = 1
 	return nil

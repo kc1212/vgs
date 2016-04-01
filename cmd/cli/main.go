@@ -27,6 +27,7 @@ func cli() {
 	jobs := make([]model.Job, *jobsCount)
 	for i := range jobs {
 		jobs[i].ID = rand.Int63()
+		jobs[i].Duration = rand.Int63n(10)
 	}
 
 	reply := -1

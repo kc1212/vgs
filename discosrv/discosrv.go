@@ -30,7 +30,7 @@ func (ds *DiscoSrv) Run(addr string) {
 	ds.gsSet = &common.SyncedSet{S: make(map[string]common.IntClient)}
 	ds.rmSet = &common.SyncedSet{S: make(map[string]common.IntClient)}
 	go common.RunRPC(ds, addr)
-	ds.removeDead()
+	ds.runRemoveDead()
 }
 
 func (ds *DiscoSrv) ImAlive(args *DiscoSrvArgs, reply *DiscoSrvReply) error {
@@ -57,14 +57,14 @@ func (ds *DiscoSrv) ImAlive(args *DiscoSrvArgs, reply *DiscoSrvReply) error {
 	return nil
 }
 
-func (ds *DiscoSrv) removeDead() {
+func (ds *DiscoSrv) runRemoveDead() {
 	for {
 		time.Sleep(time.Second)
 
 		threshold := int64(20)
 		t := time.Now().Unix()
-		log.Println("GS: ", ds.gsSet)
-		log.Println("RM: ", ds.rmSet)
+		log.Println("GS: ", *ds.gsSet)
+		log.Println("RM: ", *ds.rmSet)
 
 		// TODO repeated code, loop over the two sets
 		ds.gsSet.Lock()

@@ -74,9 +74,21 @@ func (gs *GridSdr) Run() {
 	go gs.runTasks()
 
 	for {
-		// TODO get all the rmNodes
-		// TODO arrange them in loaded order
-		// TODO allocate *all* jobs
+		if gs.leader == gs.Addr {
+			// TODO get all the rmNodes
+			// TODO arrange them in loaded order
+			// TODO allocate *all* jobs
+
+			// TODO add mutex to jobs
+			if len(gs.jobs) > 0 {
+				// NOTE: remember tasks all run in CS
+				gs.tasks <- func() (interface{}, error) {
+					reply, e := addJobsToRM("localhost:3003", &gs.jobs)
+					// TODO remove jobs from all GSs
+					return reply, e
+				}
+			}
+		}
 		time.Sleep(time.Second)
 	}
 }
@@ -116,7 +128,7 @@ func sendMsgToRM(addr string, args *RPCArgs) (int, error) {
 }
 
 // addJobsToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
-func addJobsToRM(addr string, args *RPCArgs) (int, error) {
+func addJobsToRM(addr string, args *[]Job) (int, error) {
 	log.Printf("Sending job to %v\n", addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
