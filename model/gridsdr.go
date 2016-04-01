@@ -13,11 +13,11 @@ import "github.com/kc1212/vgs/discosrv"
 // GridSdr describes the properties of one grid scheduler
 type GridSdr struct {
 	common.Node
-	gsNodes       *common.SyncedSet // other GridSdr's, not including myself
-	rmNodes       *common.SyncedSet
-	leader        string // the lead GridSdr
-	jobs          []Job
-	tasks         chan common.Task // these tasks require CS
+	gsNodes       *common.SyncedSet // other grid schedulers, not including myself
+	rmNodes       *common.SyncedSet // the resource managers
+	leader        string            // the lead grid scheduler
+	jobs          []Job             // TODO this needs mutex around it
+	tasks         chan common.Task  // these tasks require critical section (CS)
 	inElection    *common.SyncedVal
 	mutexRespChan chan int
 	mutexReqChan  chan common.Task
@@ -79,17 +79,36 @@ func (gs *GridSdr) Run() {
 			// TODO arrange them in loaded order
 			// TODO allocate *all* jobs
 
-			// TODO add mutex to jobs
-			if len(gs.jobs) > 0 {
-				// NOTE: remember tasks all run in CS
-				gs.tasks <- func() (interface{}, error) {
-					reply, e := addJobsToRM("localhost:3003", &gs.jobs)
-					// TODO remove jobs from all GSs
-					return reply, e
-				}
+			if anyJobStatus(common.Waiting, gs.jobs) {
+				ids := make([]int64, 1)
+				ids[0] = gs.jobs[len(gs.jobs)-1].ID
+				gs.addJobSchedulingTask("localhost:3003", ids)
 			}
 		}
 		time.Sleep(time.Second)
+	}
+}
+
+// addJobSchedulingTask sends the first `n` jobs to a resource manager at `rmAddr`
+func (gs *GridSdr) addJobSchedulingTask(rmAddr string, ids []int64) {
+	// NOTE: remember tasks all run in CS
+	gs.tasks <- func() (interface{}, error) {
+		// send the job to the resman
+		jobsToSend := jobsFromIDs(ids, gs.jobs)
+		reply, e := addJobsToRM("localhost:3003", &jobsToSend)
+
+		// update jobs status to Submitted if they have been successfully submitted
+		if e == nil {
+			log.Printf("updating to submitted!!!")
+			gs.jobs = updateJobs(ids, gs.jobs, common.Submitted)
+		}
+
+		// update jobs on other GSs, ignore the error
+		for k := range gs.gsNodes.GetAll() {
+			replaceJobsInGS(k, &gs.jobs)
+		}
+
+		return reply, e
 	}
 }
 
@@ -164,6 +183,18 @@ func addJobsToGS(addr string, jobs *[]Job) (int, error) {
 		return reply, e
 	}
 	common.RemoteCallNoFail(remote, "GridSdr.RecvJobs", jobs, &reply)
+	return reply, remote.Close()
+}
+
+func replaceJobsInGS(addr string, jobs *[]Job) (int, error) {
+	log.Printf("Updating jobs %v, to %v\n", *jobs, addr)
+	reply := -1
+	remote, e := rpc.DialHTTP("tcp", addr)
+	if e != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return reply, e
+	}
+	common.RemoteCallNoFail(remote, "GridSdr.ReplaceJobs", jobs, &reply)
 	return reply, remote.Close()
 }
 
@@ -299,6 +330,13 @@ func (gs *GridSdr) RecvMsg(args *RPCArgs, reply *int) error {
 func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
 	log.Printf("adding %v\n", *jobs)
 	gs.jobs = append(gs.jobs, (*jobs)...)
+	*reply = 0
+	return nil
+}
+
+func (gs *GridSdr) ReplaceJobs(jobs *[]Job, reply *int) error {
+	log.Printf("adding %v\n", *jobs)
+	gs.jobs = *jobs
 	*reply = 0
 	return nil
 }
