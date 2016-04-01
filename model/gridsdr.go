@@ -2,7 +2,6 @@ package model
 
 import (
 	"log"
-	"math/rand"
 	"net/rpc"
 	"time"
 )
@@ -59,8 +58,6 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 
 // Run is the main function for GridSdr, it starts all its services.
 func (gs *GridSdr) Run() {
-	rand.Seed(time.Now().UTC().UnixNano())
-
 	reply, e := discosrv.ImAliveProbe(gs.Addr, gs.Type, gs.discosrvAddr)
 	if e != nil {
 		log.Panicf("Discosrv on %v not online\n", gs.discosrvAddr)
