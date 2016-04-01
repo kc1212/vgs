@@ -7,19 +7,22 @@ import (
 	"time"
 )
 
+import "github.com/kc1212/vgs/common"
+import "github.com/kc1212/vgs/discosrv"
+
 // GridSdr describes the properties of one grid scheduler
 type GridSdr struct {
-	Node
-	others        *SyncedSet // other GridSdr's
+	common.Node
+	others        *common.SyncedSet // other GridSdr's
 	resmans       []string
 	leader        string // the lead GridSdr
 	jobs          []Job
-	tasks         chan Task // these tasks require CS
-	inElection    *SyncedVal
+	tasks         chan common.Task // these tasks require CS
+	inElection    *common.SyncedVal
 	mutexRespChan chan int
-	mutexReqChan  chan Task
-	mutexState    *SyncedVal
-	clock         *SyncedVal
+	mutexReqChan  chan common.Task
+	mutexState    *common.SyncedVal
+	clock         *common.SyncedVal
 	reqClock      int64
 	discosrvAddr  string
 }
@@ -28,27 +31,27 @@ type GridSdr struct {
 type GridSdrArgs struct {
 	ID    int
 	Addr  string
-	Type  MsgType
+	Type  common.MsgType
 	Clock int64
 }
 
 // InitGridSdr creates a grid scheduler.
 func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 	// NOTE: the following three values are initiated in `Run`
-	others := &SyncedSet{set: make(map[string]int64)}
+	others := &common.SyncedSet{S: make(map[string]int64)}
 	var resmans []string
 	var leader string
 
 	return GridSdr{
-		Node{id, addr, GSNode},
+		common.Node{id, addr, common.GSNode},
 		others, resmans, leader,
 		make([]Job, 0),
-		make(chan Task, 100),
-		&SyncedVal{val: false},
+		make(chan common.Task, 100),
+		&common.SyncedVal{V: false},
 		make(chan int, 100),
-		make(chan Task, 100),
-		&SyncedVal{val: StateReleased},
-		&SyncedVal{val: int64(0)},
+		make(chan common.Task, 100),
+		&common.SyncedVal{V: common.StateReleased},
+		&common.SyncedVal{V: int64(0)},
 		0,
 		dsAddr,
 	}
@@ -58,15 +61,15 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 func (gs *GridSdr) Run() {
 	rand.Seed(time.Now().UTC().UnixNano())
 
-	reply, e := imAliveProbe(gs.addr, gs.nodeType, gs.discosrvAddr)
+	reply, e := discosrv.ImAliveProbe(gs.Addr, gs.Type, gs.discosrvAddr)
 	if e != nil {
 		log.Panicf("Discosrv on %v not online\n", gs.discosrvAddr)
 	}
 	gs.populateOthers(reply.GSs)
 	gs.populateClusters(reply.RMs)
 
-	go imAlivePoll(gs.addr, GSNode, gs.discosrvAddr)
-	go RunRPC(gs, gs.addr)
+	go discosrv.ImAlivePoll(gs.Addr, gs.Type, gs.discosrvAddr)
+	go common.RunRPC(gs, gs.Addr)
 	go gs.pollLeader()
 	go gs.runTasks()
 
@@ -79,7 +82,7 @@ func (gs *GridSdr) Run() {
 }
 
 func (gs *GridSdr) populateOthers(nodes []string) {
-	arg := GridSdrArgs{gs.id, gs.addr, GetIDMsg, gs.clock.geti64()}
+	arg := GridSdrArgs{gs.ID, gs.Addr, common.GetIDMsg, gs.clock.Geti64()}
 	for _, node := range nodes {
 		id, e := sendMsgToGS(node, &arg)
 		if e == nil {
@@ -93,7 +96,7 @@ func (gs *GridSdr) populateClusters(nodes []string) {
 }
 
 // addJobsToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
-func addJobsToRM(addr string, args ResManArgs) (int, error) {
+func addJobsToRM(addr string, args *ResManArgs) (int, error) {
 	log.Printf("Sending job to %v\n", addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
@@ -101,20 +104,20 @@ func addJobsToRM(addr string, args ResManArgs) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	RemoteCallNoFail(remote, "ResMan.AddJob", &args, &reply)
+	common.RemoteCallNoFail(remote, "ResMan.AddJob", args, &reply)
 	return reply, remote.Close()
 }
 
 // sendMsgToGS creates an RPC connection with another GridSdr and does one remote call on RecvMsg.
 func sendMsgToGS(addr string, args *GridSdrArgs) (int, error) {
-	log.Printf("Sending message %v to %v\n", args, addr)
+	log.Printf("Sending message %v to %v\n", *args, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	RemoteCallNoFail(remote, "GridSdr.RecvMsg", &args, &reply)
+	common.RemoteCallNoFail(remote, "GridSdr.RecvMsg", args, &reply)
 	return reply, remote.Close()
 }
 
@@ -128,7 +131,7 @@ func addJobsToGS(addr string, jobs *[]Job) (int, error) {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	RemoteCallNoFail(remote, "GridSdr.RecvJobs", &jobs, &reply)
+	common.RemoteCallNoFail(remote, "GridSdr.RecvJobs", jobs, &reply)
 	return reply, remote.Close()
 }
 
@@ -136,26 +139,26 @@ func addJobsToGS(addr string, jobs *[]Job) (int, error) {
 // Initially we set the mutexState to StateWanted, if the critical section is obtained we set it to StateHeld.
 // NOTE: this function isn't designed to be thread safe, it is run periodically in `runTasks`.
 func (gs *GridSdr) obtainCritSection() {
-	if gs.mutexState.get().(MutexState) != StateReleased {
+	if gs.mutexState.Get().(common.MutexState) != common.StateReleased {
 		log.Panicf("Should not be in CS, state: %v\n", gs)
 	}
 
-	gs.mutexState.set(StateWanted)
+	gs.mutexState.Set(common.StateWanted)
 
 	// empty the channel before starting just in case
 	for len(gs.mutexRespChan) > 0 {
 		<-gs.mutexRespChan
 	}
 
-	gs.clock.tick()
+	gs.clock.Tick()
 	successes := 0
 	for k, _ := range gs.others.GetAll() {
-		_, e := sendMsgToGS(k, &GridSdrArgs{gs.id, gs.addr, MutexReq, gs.clock.geti64()})
+		_, e := sendMsgToGS(k, &GridSdrArgs{gs.ID, gs.Addr, common.MutexReq, gs.clock.Geti64()})
 		if e == nil {
 			successes++
 		}
 	}
-	gs.reqClock = gs.clock.geti64()
+	gs.reqClock = gs.clock.Geti64()
 
 	// wait until others has written to mutexRespChan or time out (2s)
 	t := time.Now().Add(2 * time.Second)
@@ -173,13 +176,13 @@ func (gs *GridSdr) obtainCritSection() {
 	}
 
 	// here we're in critical section
-	gs.mutexState.set(StateHeld)
-	log.Println("In CS!", gs.id)
+	gs.mutexState.Set(common.StateHeld)
+	log.Println("In CS!", gs.ID)
 }
 
 // releaseCritSection sets the mutexState to StateReleased and then runs all the queued requests.
 func (gs *GridSdr) releaseCritSection() {
-	gs.mutexState.set(StateReleased)
+	gs.mutexState.Set(common.StateReleased)
 	for len(gs.mutexReqChan) > 0 {
 		resp := <-gs.mutexReqChan
 		_, e := resp()
@@ -187,23 +190,23 @@ func (gs *GridSdr) releaseCritSection() {
 			log.Panic("task failed with", e)
 		}
 	}
-	log.Println("Out CS!", gs.id)
+	log.Println("Out CS!", gs.ID)
 }
 
 // elect implements the Bully algorithm.
 func (gs *GridSdr) elect() {
 	defer func() {
-		gs.inElection.set(false)
+		gs.inElection.Set(false)
 	}()
-	gs.inElection.set(true)
+	gs.inElection.Set(true)
 
-	gs.clock.tick()
+	gs.clock.Tick()
 	oks := 0
 	for k, v := range gs.others.GetAll() {
-		if v < int64(gs.id) {
+		if v < int64(gs.ID) {
 			continue // do nothing to lower ids
 		}
-		_, e := sendMsgToGS(k, &GridSdrArgs{gs.id, gs.addr, ElectionMsg, gs.clock.geti64()})
+		_, e := sendMsgToGS(k, &GridSdrArgs{gs.ID, gs.Addr, common.ElectionMsg, gs.clock.Geti64()})
 		if e == nil {
 			oks++
 		}
@@ -211,11 +214,11 @@ func (gs *GridSdr) elect() {
 
 	// if no responses, then set the node itself as leader, and tell others
 	if oks == 0 {
-		gs.clock.tick()
-		gs.leader = gs.addr
+		gs.clock.Tick()
+		gs.leader = gs.Addr
 		log.Printf("I'm the leader (%v).\n", gs.leader)
 		for k, _ := range gs.others.GetAll() {
-			args := GridSdrArgs{gs.id, gs.addr, CoordinateMsg, gs.clock.geti64()}
+			args := GridSdrArgs{gs.ID, gs.Addr, common.CoordinateMsg, gs.clock.Geti64()}
 			sendMsgToGS(k, &args) // NOTE: ok to fail the send, because nodes might be done
 		}
 	}
@@ -229,23 +232,23 @@ func (gs *GridSdr) elect() {
 func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 	log.Printf("Msg received %v\n", *args)
 	*reply = 1
-	gs.clock.set(max64(gs.clock.geti64(), args.Clock) + 1) // update Lamport clock
-	if args.Type == CoordinateMsg {
+	gs.clock.Set(common.Max64(gs.clock.Geti64(), args.Clock) + 1) // update Lamport clock
+	if args.Type == common.CoordinateMsg {
 		gs.leader = args.Addr
 		log.Printf("Leader set to %v\n", gs.leader)
-	} else if args.Type == ElectionMsg {
+	} else if args.Type == common.ElectionMsg {
 		// don't start a new election if one is already running
-		if !gs.inElection.get().(bool) {
+		if !gs.inElection.Get().(bool) {
 			go gs.elect()
 		}
-	} else if args.Type == MutexReq {
+	} else if args.Type == common.MutexReq {
 		go gs.respCritSection(*args)
 
-	} else if args.Type == MutexResp {
+	} else if args.Type == common.MutexResp {
 		gs.mutexRespChan <- 0
 
-	} else if args.Type == GetIDMsg {
-		*reply = gs.id
+	} else if args.Type == common.GetIDMsg {
+		*reply = gs.ID
 		gs.others.Set(args.Addr, int64(args.ID))
 
 	} else {
@@ -303,18 +306,18 @@ func (gs *GridSdr) runTasks() {
 
 // argsIsLater checks whether args has a later Lamport clock, tie break using node ID.
 func (gs *GridSdr) argsIsLater(args GridSdrArgs) bool {
-	return gs.clock.geti64() < args.Clock || (gs.clock.geti64() == args.Clock && gs.id < args.ID)
+	return gs.clock.Geti64() < args.Clock || (gs.clock.Geti64() == args.Clock && gs.ID < args.ID)
 }
 
 // respCritSection puts the critical section response into the response queue when it can't respond straight away.
 func (gs *GridSdr) respCritSection(args GridSdrArgs) {
 	resp := func() (interface{}, error) {
-		sendMsgToGS(args.Addr, &GridSdrArgs{gs.id, gs.addr, MutexResp, gs.reqClock})
+		sendMsgToGS(args.Addr, &GridSdrArgs{gs.ID, gs.Addr, common.MutexResp, gs.reqClock})
 		return 0, nil
 	}
 
-	st := gs.mutexState.get().(MutexState)
-	if st == StateHeld || (st == StateWanted && gs.argsIsLater(args)) {
+	st := gs.mutexState.Get().(common.MutexState)
+	if st == common.StateHeld || (st == common.StateWanted && gs.argsIsLater(args)) {
 		gs.mutexReqChan <- resp
 	} else {
 		resp()
@@ -327,7 +330,7 @@ func (gs *GridSdr) pollLeader() {
 		time.Sleep(time.Second)
 
 		// don't do anything if election is running or I'm leader
-		if gs.inElection.get().(bool) || gs.addr == gs.leader {
+		if gs.inElection.Get().(bool) || gs.Addr == gs.leader {
 			continue
 		}
 

@@ -7,8 +7,10 @@ import (
 	"net/rpc"
 )
 
+import "github.com/kc1212/vgs/common"
+
 type ResMan struct {
-	Node
+	common.Node
 	nodes []Worker
 	jobs  []Job
 }
@@ -20,7 +22,7 @@ type ResManArgs struct {
 func RunResMan(n int, port string) {
 	nodes := make([]Worker, n)
 	// TODO make proper Node
-	rm := ResMan{Node{}, nodes, *new([]Job)}
+	rm := ResMan{common.Node{}, nodes, *new([]Job)}
 	rm.startRPC(port)
 	rm.startMainLoop()
 }

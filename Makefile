@@ -5,7 +5,8 @@ execs = cli discosrv gridsdr resman
 all: $(execs)
 
 $(execs):
-	go build -v github.com/kc1212/vgs/cmd/$@
+	mkdir -p bin
+	go build -v  -o bin/$@ github.com/kc1212/vgs/cmd/$@
 
 clean:
-	rm -f $(execs)
+	rm -rf bin
