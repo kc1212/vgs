@@ -18,7 +18,8 @@ const (
 	CoordinateMsg
 	MutexReq
 	MutexResp
-	GetIDMsg
+	GSUpMsg
+	RMUpMsg
 )
 
 type MutexState int
@@ -79,15 +80,26 @@ func Max64(a int64, b int64) int64 {
 	return b
 }
 
-type SyncedSet struct {
-	sync.RWMutex
-	S map[string]int64
+type IntClient struct {
+	Client *rpc.Client
+	ID     int64
 }
 
-func (s *SyncedSet) Set(k string, v int64) {
+type SyncedSet struct {
+	sync.RWMutex
+	S map[string]IntClient
+}
+
+func (s *SyncedSet) Set(k string, v IntClient) {
 	s.Lock()
 	defer s.Unlock()
 	s.S[k] = v
+}
+
+func (s *SyncedSet) SetInt(k string, v int64) {
+	s.Lock()
+	defer s.Unlock()
+	s.S[k] = IntClient{s.S[k].Client, v}
 }
 
 func (s *SyncedSet) Delete(k string) bool {
@@ -101,14 +113,21 @@ func (s *SyncedSet) Delete(k string) bool {
 	return true
 }
 
-func (s *SyncedSet) Get(k string) (v int64, ok bool) {
+func (s *SyncedSet) Get(k string) (v IntClient, ok bool) {
 	s.RLock()
 	defer s.RUnlock()
 	v, ok = s.S[k]
 	return
 }
 
-func (s *SyncedSet) GetAll() map[string]int64 {
+func (s *SyncedSet) GetInt(k string) (int64, bool) {
+	s.RLock()
+	defer s.RUnlock()
+	v, ok := s.S[k]
+	return v.ID, ok
+}
+
+func (s *SyncedSet) GetAll() map[string]IntClient {
 	s.RLock()
 	defer s.RUnlock()
 	return s.S
@@ -135,7 +154,7 @@ func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply int
 	return e
 }
 
-func SliceFromMap(mymap map[string]int64) []string {
+func SliceFromMap(mymap map[string]IntClient) []string {
 	keys := make([]string, len(mymap))
 
 	i := 0

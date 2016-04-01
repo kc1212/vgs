@@ -19,7 +19,7 @@ type ResMan struct {
 }
 
 type ResManArgs struct {
-	Test int // TODO change this an actual job
+	Type common.MsgType
 }
 
 func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
@@ -39,11 +39,21 @@ func (rm *ResMan) Run() {
 	rm.startMainLoop()
 }
 
-// the RPC function
+// AddJob RPC call
 func (rm *ResMan) AddJob(args *ResManArgs, reply *int) error {
 	log.Printf("Message received %v\n", *args)
 	// rm.jobs = append(rm.jobs, args.JobArg)
 	*reply = 1
+	return nil
+}
+
+// RecvMsg PRC call
+func (rm *ResMan) RecvMsg(args *ResManArgs, reply *int) error {
+	*reply = -1
+	if args.Type == common.RMUpMsg {
+
+	} else {
+	}
 	return nil
 }
 

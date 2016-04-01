@@ -27,8 +27,8 @@ type DiscoSrvReply struct {
 }
 
 func (ds *DiscoSrv) Run(addr string) {
-	ds.gsSet = &common.SyncedSet{S: make(map[string]int64)}
-	ds.rmSet = &common.SyncedSet{S: make(map[string]int64)}
+	ds.gsSet = &common.SyncedSet{S: make(map[string]common.IntClient)}
+	ds.rmSet = &common.SyncedSet{S: make(map[string]common.IntClient)}
 	go common.RunRPC(ds, addr)
 	ds.removeDead()
 }
@@ -37,9 +37,9 @@ func (ds *DiscoSrv) ImAlive(args *DiscoSrvArgs, reply *DiscoSrvReply) error {
 	now := time.Now().Unix()
 	reply.Reply = 0
 	if args.Type == common.GSNode {
-		ds.gsSet.Set(args.Addr, now)
+		ds.gsSet.SetInt(args.Addr, now)
 	} else if args.Type == common.RMNode {
-		ds.rmSet.Set(args.Addr, now)
+		ds.rmSet.SetInt(args.Addr, now)
 	} else {
 		reply.Reply = 1
 		return errors.New("Invalid NodeType!")
@@ -69,7 +69,7 @@ func (ds *DiscoSrv) removeDead() {
 		// TODO repeated code, loop over the two sets
 		ds.gsSet.Lock()
 		for k := range ds.gsSet.S {
-			if t-ds.gsSet.S[k] > threshold {
+			if t-ds.gsSet.S[k].ID > threshold {
 				delete(ds.gsSet.S, k)
 			}
 		}
@@ -77,7 +77,7 @@ func (ds *DiscoSrv) removeDead() {
 
 		ds.rmSet.Lock()
 		for k := range ds.rmSet.S {
-			if t-ds.rmSet.S[k] > threshold {
+			if t-ds.rmSet.S[k].ID > threshold {
 				delete(ds.rmSet.S, k)
 			}
 		}

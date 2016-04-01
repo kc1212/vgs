@@ -38,7 +38,7 @@ type GridSdrArgs struct {
 // InitGridSdr creates a grid scheduler.
 func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 	// NOTE: the following three values are initiated in `Run`
-	others := &common.SyncedSet{S: make(map[string]int64)}
+	others := &common.SyncedSet{S: make(map[string]common.IntClient)}
 	var resmans []string
 	var leader string
 
@@ -65,8 +65,8 @@ func (gs *GridSdr) Run() {
 	if e != nil {
 		log.Panicf("Discosrv on %v not online\n", gs.discosrvAddr)
 	}
-	gs.populateOthers(reply.GSs)
-	gs.populateClusters(reply.RMs)
+	gs.notifyAndPopulateGSs(reply.GSs)
+	gs.notifyAndPopulateRMs(reply.RMs)
 
 	go discosrv.ImAlivePoll(gs.Addr, gs.Type, gs.discosrvAddr)
 	go common.RunRPC(gs, gs.Addr)
@@ -81,18 +81,33 @@ func (gs *GridSdr) Run() {
 	}
 }
 
-func (gs *GridSdr) populateOthers(nodes []string) {
-	arg := GridSdrArgs{gs.ID, gs.Addr, common.GetIDMsg, gs.clock.Geti64()}
+func (gs *GridSdr) notifyAndPopulateGSs(nodes []string) {
+	arg := GridSdrArgs{gs.ID, gs.Addr, common.GSUpMsg, gs.clock.Geti64()}
 	for _, node := range nodes {
 		id, e := sendMsgToGS(node, &arg)
 		if e == nil {
-			gs.others.Set(node, int64(id))
+			gs.others.SetInt(node, int64(id))
 		}
 	}
 }
 
-func (gs *GridSdr) populateClusters(nodes []string) {
+func (gs *GridSdr) notifyAndPopulateRMs(nodes []string) {
+	// for _, node := range nodes {
+	// 	// sendMsgToRM(node)
+	// }
 	gs.resmans = nodes
+}
+
+func sendMsgToRM(addr string, args *ResManArgs) (int, error) {
+	log.Printf("Sending message %v to %v\n", *args, addr)
+	reply := -1
+	remote, e := rpc.DialHTTP("tcp", addr)
+	if e != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return reply, e
+	}
+	common.RemoteCallNoFail(remote, "ResMan.RecvMsg", args, &reply)
+	return reply, remote.Close()
 }
 
 // addJobsToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
@@ -203,7 +218,7 @@ func (gs *GridSdr) elect() {
 	gs.clock.Tick()
 	oks := 0
 	for k, v := range gs.others.GetAll() {
-		if v < int64(gs.ID) {
+		if v.ID < int64(gs.ID) {
 			continue // do nothing to lower ids
 		}
 		_, e := sendMsgToGS(k, &GridSdrArgs{gs.ID, gs.Addr, common.ElectionMsg, gs.clock.Geti64()})
@@ -247,9 +262,9 @@ func (gs *GridSdr) RecvMsg(args *GridSdrArgs, reply *int) error {
 	} else if args.Type == common.MutexResp {
 		gs.mutexRespChan <- 0
 
-	} else if args.Type == common.GetIDMsg {
+	} else if args.Type == common.GSUpMsg {
 		*reply = gs.ID
-		gs.others.Set(args.Addr, int64(args.ID))
+		gs.others.SetInt(args.Addr, int64(args.ID))
 
 	} else {
 		log.Panic("Invalid message!", args)
