@@ -8,22 +8,31 @@ import (
 )
 
 import "github.com/kc1212/vgs/common"
+import "github.com/kc1212/vgs/discosrv"
 
 type ResMan struct {
 	common.Node
-	nodes []Worker
-	jobs  []Job
+	workers []Worker
+	gsnodes []string
+	jobs    []Job
+	// discorvAddr string
 }
 
 type ResManArgs struct {
 	Test int // TODO change this an actual job
 }
 
-func RunResMan(n int, port string) {
-	nodes := make([]Worker, n)
+func RunResMan(n int, id int, addr string, discorvAddr string) {
+	workers := make([]Worker, n)
 	// TODO make proper Node
-	rm := ResMan{common.Node{}, nodes, *new([]Job)}
-	rm.startRPC(port)
+	reply, e := discosrv.ImAliveProbe(addr, common.RMNode, discorvAddr)
+	if e != nil {
+		log.Panicf("Discosrv on %v not online\n", discorvAddr)
+	}
+
+	rm := ResMan{common.Node{ID: id, Addr: addr, Type: common.RMNode}, workers, reply.GSs, *new([]Job)}
+
+	go common.RunRPC(rm, addr)
 	rm.startMainLoop()
 }
 
@@ -52,15 +61,15 @@ func (rm *ResMan) startMainLoop() {
 	for {
 	}
 	// TODO receive messages from grid scheduler
-	// TODO update status of nodes
+	// TODO update status of workers
 	// TODO schedule jobs
 }
 
 func (rm *ResMan) nextFreeNode() int {
-	// TODO looping over all nodes is inefficient
-	// because the low idx nodes are always assigned first
-	for i := range rm.nodes {
-		if !rm.nodes[i].running {
+	// TODO looping over all workers is inefficient
+	// because the low idx workers are always assigned first
+	for i := range rm.workers {
+		if !rm.workers[i].running {
 			return i
 		}
 	}
@@ -80,10 +89,10 @@ func (rm *ResMan) schedule() {
 // the node should already be free before calling this function
 func (rm *ResMan) assign(idx int) {
 	j := rm.jobs[0]
-	rm.nodes[idx].startJob(j)
+	rm.workers[idx].startJob(j)
 	rm.jobs = rm.jobs[1:] // remove the very first job
 }
 
 func (rm ResMan) logStatus() {
-	log.Printf("ResMan: %v jobs and %v nodes\n", len(rm.jobs), len(rm.nodes))
+	log.Printf("ResMan: %v jobs and %v workers\n", len(rm.jobs), len(rm.workers))
 }
