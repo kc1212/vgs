@@ -2,8 +2,8 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"log"
+	"net"
 	"os"
 )
 
@@ -16,12 +16,10 @@ func main() {
 	if e != nil {
 		log.Panic("Failed to get hostname")
 	}
-	defaultAddr = defaultAddr + ":" + "3333"
-
+	defaultAddr = net.JoinHostPort(defaultAddr, "3333")
 	discorvAddr := flag.String("addr", defaultAddr, "hostname:port for the DiscoSrv")
 
 	flag.Parse()
 
 	ds.Run(*discorvAddr)
-	fmt.Println("test")
 }

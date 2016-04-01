@@ -21,19 +21,17 @@ type ResManArgs struct {
 	Test int // TODO change this an actual job
 }
 
-// Run is the main function for ResMan, it starts all its services.
-func Run(n int, id int, addr string, dsAddr string) {
+// RunResMan is the main function, it starts all its services.
+func RunResMan(n int, id int, addr string, dsAddr string) {
 	workers := make([]Worker, n)
 	// TODO make proper Node
 	reply, e := discosrv.ImAliveProbe(addr, common.RMNode, dsAddr)
 	if e != nil {
 		log.Panicf("Discosrv on %v not online\n", dsAddr)
 	}
-
 	rm := ResMan{common.Node{ID: id, Addr: addr, Type: common.RMNode}, workers, reply.GSs, *new([]Job)}
 
 	go discosrv.ImAlivePoll(addr, common.RMNode, dsAddr)
-
 	go common.RunRPC(rm, addr)
 	rm.startMainLoop()
 }

@@ -87,7 +87,7 @@ func (ds *DiscoSrv) removeDead() {
 
 // TODO some repeated code in "ImAliveProbe" and "ImAlivePoll"
 
-// ImAliveProbe sends Node's info to Discosrv
+// ImAliveProbe sends a probe message to discosrv, discosrv should return a list of RMs and GSs.
 func ImAliveProbe(nodeAddr string, nodeType common.NodeType, dsAddr string) (DiscoSrvReply, error) {
 	remote, e := rpc.DialHTTP("tcp", dsAddr)
 	reply := DiscoSrvReply{}
@@ -105,7 +105,7 @@ func ImAliveProbe(nodeAddr string, nodeType common.NodeType, dsAddr string) (Dis
 	return reply, e
 }
 
-// ImAlivePoll sends which Nodes are online
+// ImAlivePoll polls the discosrv to inform it that the node on `nodeAddr` is online.
 func ImAlivePoll(nodeAddr string, nodeType common.NodeType, dsAddr string) (DiscoSrvReply, error) {
 	remote, e := rpc.DialHTTP("tcp", dsAddr)
 	reply := DiscoSrvReply{}
