@@ -2,6 +2,7 @@ package common
 
 //go:generate stringer -type=MsgType
 //go:generate stringer -type=MutexState
+//go:generate stringer -type=JobStatus
 
 import (
 	"log"
@@ -43,6 +44,15 @@ const (
 	GSNode NodeType = iota
 	RMNode
 	DSNode
+)
+
+type JobStatus int
+
+const (
+	Waiting JobStatus = iota
+	Submitted
+	Running
+	Finished
 )
 
 type Task func() (interface{}, error)
@@ -131,6 +141,14 @@ func (s *SyncedSet) GetAll() map[string]IntClient {
 	s.RLock()
 	defer s.RUnlock()
 	return s.S
+}
+
+func SliceToMap(ss []string) map[string]IntClient {
+	m := make(map[string]IntClient)
+	for _, s := range ss {
+		m[s] = IntClient{}
+	}
+	return m
 }
 
 // runRPC registers and runs the RPC server.
