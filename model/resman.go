@@ -12,27 +12,30 @@ import "github.com/kc1212/vgs/discosrv"
 
 type ResMan struct {
 	common.Node
-	workers []Worker
-	gsnodes []string
-	jobs    []Job
+	workers      []Worker
+	gsnodes      []string
+	jobs         []Job
+	discosrvAddr string
 }
 
 type ResManArgs struct {
 	Test int // TODO change this an actual job
 }
 
-// RunResMan is the main function, it starts all its services.
-func RunResMan(n int, id int, addr string, dsAddr string) {
-	workers := make([]Worker, n)
-	// TODO make proper Node
+func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 	reply, e := discosrv.ImAliveProbe(addr, common.RMNode, dsAddr)
 	if e != nil {
 		log.Panicf("Discosrv on %v not online\n", dsAddr)
 	}
-	rm := ResMan{common.Node{ID: id, Addr: addr, Type: common.RMNode}, workers, reply.GSs, *new([]Job)}
+	return ResMan{
+		common.Node{ID: id, Addr: addr, Type: common.RMNode},
+		make([]Worker, n), reply.GSs, *new([]Job), dsAddr}
+}
 
-	go discosrv.ImAlivePoll(addr, common.RMNode, dsAddr)
-	go common.RunRPC(rm, addr)
+// RunResMan is the main function, it starts all its services.
+func (rm *ResMan) Run() {
+	go discosrv.ImAlivePoll(rm.Addr, common.RMNode, rm.discosrvAddr)
+	go common.RunRPC(rm, rm.Addr)
 	rm.startMainLoop()
 }
 

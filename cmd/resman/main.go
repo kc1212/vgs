@@ -24,5 +24,6 @@ func main() {
 
 	flag.Parse()
 
-	model.RunResMan(*n, *id, *addr, *discosrvAddr)
+	rm := model.InitResMan(*n, *id, *addr, *discosrvAddr)
+	rm.Run()
 }
