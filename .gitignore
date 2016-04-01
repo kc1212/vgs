@@ -23,8 +23,5 @@ _testmain.go
 *.test
 *.prof
 
-# Project executables
-cli
-discosrv
-gridsdr
-resman
+# build output
+bin

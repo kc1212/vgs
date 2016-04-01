@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
 	"os"
 )
 
@@ -14,7 +15,7 @@ func main() {
 	if e != nil {
 		log.Panic("Failed to get hostname")
 	}
-	defaultName = defaultName + ":" + "3000"
+	defaultName = net.JoinHostPort(defaultName, "3000")
 
 	id := flag.Int("id", 0, "id of the node")
 	name := flag.String("addr", defaultName, "hostname:port for this node")

@@ -1,4 +1,4 @@
-package model
+package common
 
 //go:generate stringer -type=MsgType
 //go:generate stringer -type=MutexState
@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/rpc"
 	"sync"
-	"time"
 )
 
 type MsgType int
@@ -32,9 +31,9 @@ const (
 
 // Node is a generic node
 type Node struct {
-	id       int
-	addr     string
-	nodeType NodeType
+	ID   int
+	Addr string
+	Type NodeType
 }
 
 type NodeType int
@@ -42,37 +41,38 @@ type NodeType int
 const (
 	GSNode NodeType = iota
 	RMNode
+	DSNode
 )
 
 type Task func() (interface{}, error)
 
 type SyncedVal struct {
 	sync.RWMutex
-	val interface{}
+	V interface{}
 }
 
-func (v *SyncedVal) set(x interface{}) {
+func (v *SyncedVal) Set(x interface{}) {
 	defer v.Unlock()
 	v.Lock()
-	v.val = x
+	v.V = x
 }
 
-func (v *SyncedVal) get() interface{} {
+func (v *SyncedVal) Get() interface{} {
 	defer v.RUnlock()
 	v.RLock()
-	return v.val
+	return v.V
 }
 
-func (v *SyncedVal) geti64() int64 {
-	return v.get().(int64)
+func (v *SyncedVal) Geti64() int64 {
+	return v.Get().(int64)
 }
 
-func (t *SyncedVal) tick() {
-	x := t.get().(int64) + 1
-	t.set(x)
+func (t *SyncedVal) Tick() {
+	x := t.Get().(int64) + 1
+	t.Set(x)
 }
 
-func max64(a int64, b int64) int64 {
+func Max64(a int64, b int64) int64 {
 	if a > b {
 		return a
 	}
@@ -81,37 +81,37 @@ func max64(a int64, b int64) int64 {
 
 type SyncedSet struct {
 	sync.RWMutex
-	set map[string]int64
+	S map[string]int64
 }
 
 func (s *SyncedSet) Set(k string, v int64) {
 	s.Lock()
 	defer s.Unlock()
-	s.set[k] = v
+	s.S[k] = v
 }
 
 func (s *SyncedSet) Delete(k string) bool {
 	s.Lock()
 	defer s.Unlock()
-	_, found := s.set[k]
+	_, found := s.S[k]
 	if !found {
 		return false
 	}
-	delete(s.set, k)
+	delete(s.S, k)
 	return true
 }
 
 func (s *SyncedSet) Get(k string) (v int64, ok bool) {
 	s.RLock()
 	defer s.RUnlock()
-	v, ok = s.set[k]
+	v, ok = s.S[k]
 	return
 }
 
 func (s *SyncedSet) GetAll() map[string]int64 {
 	s.RLock()
 	defer s.RUnlock()
-	return s.set
+	return s.S
 }
 
 // runRPC registers and runs the RPC server.
@@ -135,7 +135,7 @@ func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply int
 	return e
 }
 
-func sliceFromMap(mymap map[string]int64) []string {
+func SliceFromMap(mymap map[string]int64) []string {
 	keys := make([]string, len(mymap))
 
 	i := 0
@@ -144,42 +144,4 @@ func sliceFromMap(mymap map[string]int64) []string {
 		i++
 	}
 	return keys
-}
-
-// TODO some repeated code in imAliveProbe and imAlivePoll
-func imAliveProbe(nodeAddr string, nodeType NodeType, dsAddr string) (DiscoSrvReply, error) {
-	remote, e := rpc.DialHTTP("tcp", dsAddr)
-	reply := DiscoSrvReply{}
-	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", dsAddr)
-		return reply, e
-	}
-	defer remote.Close()
-
-	args := DiscoSrvArgs{
-		nodeAddr,
-		nodeType,
-		true}
-	e = RemoteCallNoFail(remote, "DiscoSrv.ImAlive", &args, &reply)
-	return reply, e
-}
-
-func imAlivePoll(nodeAddr string, nodeType NodeType, dsAddr string) (DiscoSrvReply, error) {
-	remote, e := rpc.DialHTTP("tcp", dsAddr)
-	reply := DiscoSrvReply{}
-	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", dsAddr)
-		return reply, e
-	}
-	defer remote.Close()
-
-	args := DiscoSrvArgs{
-		nodeAddr,
-		nodeType,
-		false}
-	for {
-		// TODO check whether discosrv is still online, otherwise redail
-		RemoteCallNoFail(remote, "DiscoSrv.ImAlive", &args, &reply)
-		time.Sleep(10 * time.Second)
-	}
 }
