@@ -74,7 +74,7 @@ func (gs *GridSdr) Run() {
 		if gs.leader == gs.Addr {
 			// TODO get all the rmNodes
 			// TODO arrange them in loaded order
-			// TODO allocate *all* jobs
+			// TODO allocate when there are free slots in rm
 
 			if anyJobStatus(common.Waiting, gs.jobs) {
 				ids := make([]int64, 1)

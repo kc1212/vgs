@@ -4,9 +4,9 @@ package common
 
 import "fmt"
 
-const _MsgType_name = "ElectionMsgCoordinateMsgMutexReqMutexRespGSUpMsgRMUpMsg"
+const _MsgType_name = "ElectionMsgCoordinateMsgMutexReqMutexRespGSUpMsgRMUpMsgCountFreeWorkers"
 
-var _MsgType_index = [...]uint8{0, 11, 24, 32, 41, 48, 55}
+var _MsgType_index = [...]uint8{0, 11, 24, 32, 41, 48, 55, 71}
 
 func (i MsgType) String() string {
 	if i < 0 || i >= MsgType(len(_MsgType_index)-1) {

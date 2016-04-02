@@ -21,6 +21,7 @@ const (
 	MutexResp
 	GSUpMsg
 	RMUpMsg
+	GetCapacityMsg
 )
 
 type MutexState int

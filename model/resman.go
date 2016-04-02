@@ -12,7 +12,6 @@ type ResMan struct {
 	common.Node
 	workers      []Worker
 	gsNodes      *common.SyncedSet
-	jobs         []Job
 	discosrvAddr string
 }
 
@@ -21,7 +20,6 @@ func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 		common.Node{ID: id, Addr: addr, Type: common.RMNode},
 		make([]Worker, n),
 		&common.SyncedSet{S: make(map[string]common.IntClient)},
-		*new([]Job),
 		dsAddr}
 }
 
@@ -54,6 +52,9 @@ func (rm *ResMan) RecvMsg(args *RPCArgs, reply *int) error {
 		*reply = rm.ID
 		rm.gsNodes.SetInt(args.Addr, int64(args.ID))
 
+	} else if args.Type == common.GetCapacityMsg {
+		*reply = rm.computeCapacity()
+
 	} else {
 		log.Panic("Invalid message!", args)
 	}
@@ -81,34 +82,28 @@ func (rm *ResMan) startMainLoop() {
 	}
 }
 
-func (rm *ResMan) nextFreeNode() int {
-	// TODO looping over all workers is inefficient
-	// because the low idx workers are always assigned first
-	for i := range rm.workers {
-		if !rm.workers[i].running {
-			return i
+// computeCapacity computes the collective remaining capacity of the worker nodes.
+func (rm *ResMan) computeCapacity() int {
+	cnt := 0
+	for _, w := range rm.workers {
+		if !w.isRunning() {
+			cnt++
 		}
 	}
-	return -1
+	return cnt
 }
 
 // greedy scheduler
-func (rm *ResMan) schedule() {
-	x := rm.nextFreeNode()
-	if x > -1 {
-		// assigning the job will also remove it from the job queue
-		rm.assign(x)
+func (rm *ResMan) schedule(jobs []Job) {
+	for i := range rm.workers {
+		if !rm.workers[i].isRunning() {
+			j := jobs[0]
+			jobs = jobs[1:] // remove the very first job
+			rm.workers[i].startJob(j)
+		}
 	}
-}
 
-// always assign the very next job in queue?
-// the node should already be free before calling this function
-func (rm *ResMan) assign(idx int) {
-	j := rm.jobs[0]
-	rm.workers[idx].startJob(j)
-	rm.jobs = rm.jobs[1:] // remove the very first job
-}
-
-func (rm ResMan) logStatus() {
-	log.Printf("ResMan: %v jobs and %v workers\n", len(rm.jobs), len(rm.workers))
+	if len(jobs) > 0 {
+		log.Panic("Should've scheduled all jobs!")
+	}
 }
