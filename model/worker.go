@@ -19,6 +19,7 @@ func (n *Worker) startJob(job Job) {
 	if job.Status != common.Waiting {
 		log.Panicf("Cannot start job %v on worker %v!\n", job, *n)
 	}
+	log.Printf("Job %v started\n", job)
 	n.startTime = time.Now().Unix()
 	n.job = job
 	n.job.Status = common.Running

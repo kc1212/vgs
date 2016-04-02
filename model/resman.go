@@ -12,6 +12,7 @@ type ResMan struct {
 	common.Node
 	workers      []Worker
 	gsNodes      *common.SyncedSet
+	jobsChan     chan Job
 	discosrvAddr string
 }
 
@@ -20,6 +21,7 @@ func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 		common.Node{ID: id, Addr: addr, Type: common.RMNode},
 		make([]Worker, n),
 		&common.SyncedSet{S: make(map[string]common.IntClient)},
+		make(chan Job, 1000),
 		dsAddr}
 }
 
@@ -33,13 +35,18 @@ func (rm *ResMan) Run() {
 
 	go discosrv.ImAlivePoll(rm.Addr, common.RMNode, rm.discosrvAddr)
 	go common.RunRPC(rm, rm.Addr)
+	go rm.schedule()
 	rm.startMainLoop()
 }
 
 // AddJob RPC call
-func (rm *ResMan) AddJob(args *[]Job, reply *int) error {
-	log.Printf("Jobs received %v\n", *args)
-	// rm.jobs = append(rm.jobs, args.JobArg)
+func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
+	log.Printf("Jobs received %v\n", *jobs)
+
+	// make a channel of jobs, and then schedule them
+	for _, j := range *jobs {
+		rm.jobsChan <- j
+	}
 	*reply = 1
 	return nil
 }
@@ -94,16 +101,23 @@ func (rm *ResMan) computeCapacity() int {
 }
 
 // greedy scheduler
-func (rm *ResMan) schedule(jobs []Job) {
-	for i := range rm.workers {
-		if !rm.workers[i].isRunning() {
-			j := jobs[0]
-			jobs = jobs[1:] // remove the very first job
+func (rm *ResMan) schedule() {
+	for {
+		select {
+		case j := <-rm.jobsChan:
+			i := rm.nextFreeNode()
 			rm.workers[i].startJob(j)
 		}
 	}
+}
 
-	if len(jobs) > 0 {
-		log.Panic("Should've scheduled all jobs!")
+func (rm *ResMan) nextFreeNode() int {
+	// TODO looping over all workers is inefficient
+	// because the low idx workers are always assigned first
+	for i := range rm.workers {
+		if !rm.workers[i].isRunning() {
+			return i
+		}
 	}
+	return -1
 }
