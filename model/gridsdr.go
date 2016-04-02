@@ -6,8 +6,10 @@ import (
 	"time"
 )
 
-import "github.com/kc1212/vgs/common"
-import "github.com/kc1212/vgs/discosrv"
+import (
+	"github.com/kc1212/vgs/common"
+	"github.com/kc1212/vgs/discosrv"
+)
 
 // GridSdr describes the properties of one grid scheduler
 type GridSdr struct {
@@ -26,7 +28,7 @@ type GridSdr struct {
 	discosrvAddr  string
 }
 
-// RPCArgs is the arguments for RPC calls between grid schedulers
+// RPCArgs is the arguments for RPC calls between grid schedulers and/or resource maanagers
 type RPCArgs struct {
 	ID    int
 	Addr  string
@@ -71,19 +73,37 @@ func (gs *GridSdr) Run() {
 	go gs.runTasks()
 
 	for {
-		if gs.leader == gs.Addr {
-			// TODO get all the rmNodes
-			// TODO arrange them in loaded order
-			// TODO allocate when there are free slots in rm
-
-			if anyJobStatus(common.Waiting, gs.jobs) {
-				ids := make([]int64, 1)
-				ids[0] = gs.jobs[len(gs.jobs)-1].ID
-				gs.addJobSchedulingTask("localhost:3003", ids)
-			}
-		}
+		gs.scheduleJobs()
 		time.Sleep(time.Second)
 	}
+}
+
+// only schedule jobs when i'm the leader and there are jobs waiting to be scheduled
+func (gs *GridSdr) scheduleJobs() {
+	if gs.leader == gs.Addr && anyJobHasStatus(common.Waiting, gs.jobs) {
+		rmCapacities := gs.getRMCapacities()
+		for k, v := range rmCapacities {
+			ids := idsOfNextNJobs(gs.jobs, v, common.Waiting)
+			gs.addJobSchedulingTask(k, ids)
+		}
+	}
+}
+
+// rpcArgsForGS sets default values for GS
+func (gs *GridSdr) rpcArgsForGS(msgType common.MsgType) RPCArgs {
+	return RPCArgs{gs.ID, gs.Addr, msgType, gs.clock.Geti64()}
+}
+
+func (gs *GridSdr) getRMCapacities() map[string]int64 {
+	capacities := make(map[string]int64)
+	args := gs.rpcArgsForGS(common.GetCapacityMsg)
+	for k := range gs.rmNodes.GetAll() {
+		x, e := sendMsgToRM(k, &args)
+		if e == nil {
+			capacities[k] = int64(x)
+		}
+	}
+	return capacities
 }
 
 // addJobSchedulingTask sends the first `n` jobs to a resource manager at `rmAddr`
@@ -92,11 +112,10 @@ func (gs *GridSdr) addJobSchedulingTask(rmAddr string, ids []int64) {
 	gs.tasks <- func() (interface{}, error) {
 		// send the job to the resman
 		jobsToSend := jobsFromIDs(ids, gs.jobs)
-		reply, e := addJobsToRM("localhost:3003", &jobsToSend)
+		reply, e := addJobsToRM(rmAddr, &jobsToSend)
 
 		// update jobs status to Submitted if they have been successfully submitted
 		if e == nil {
-			log.Printf("updating to submitted!!!")
 			gs.jobs = updateJobs(ids, gs.jobs, common.Submitted)
 		}
 
@@ -110,9 +129,9 @@ func (gs *GridSdr) addJobSchedulingTask(rmAddr string, ids []int64) {
 }
 
 func (gs *GridSdr) notifyAndPopulateGSs(nodes []string) {
-	arg := RPCArgs{gs.ID, gs.Addr, common.GSUpMsg, gs.clock.Geti64()}
+	args := gs.rpcArgsForGS(common.GSUpMsg)
 	for _, node := range nodes {
-		id, e := sendMsgToGS(node, &arg)
+		id, e := sendMsgToGS(node, &args)
 		if e == nil {
 			gs.gsNodes.SetInt(node, int64(id))
 		}
@@ -120,7 +139,7 @@ func (gs *GridSdr) notifyAndPopulateGSs(nodes []string) {
 }
 
 func (gs *GridSdr) notifyAndPopulateRMs(nodes []string) {
-	args := RPCArgs{gs.ID, gs.Addr, common.RMUpMsg, gs.clock.Geti64()}
+	args := gs.rpcArgsForGS(common.RMUpMsg)
 	for _, node := range nodes {
 		id, e := sendMsgToRM(node, &args)
 		if e == nil {
@@ -212,8 +231,9 @@ func (gs *GridSdr) obtainCritSection() {
 
 	gs.clock.Tick()
 	successes := 0
-	for k, _ := range gs.gsNodes.GetAll() {
-		_, e := sendMsgToGS(k, &RPCArgs{gs.ID, gs.Addr, common.MutexReq, gs.clock.Geti64()})
+	for k := range gs.gsNodes.GetAll() {
+		args := gs.rpcArgsForGS(common.MutexReq)
+		_, e := sendMsgToGS(k, &args)
 		if e == nil {
 			successes++
 		}
@@ -266,7 +286,8 @@ func (gs *GridSdr) elect() {
 		if v.ID < int64(gs.ID) {
 			continue // do nothing to lower ids
 		}
-		_, e := sendMsgToGS(k, &RPCArgs{gs.ID, gs.Addr, common.ElectionMsg, gs.clock.Geti64()})
+		args := gs.rpcArgsForGS(common.ElectionMsg)
+		_, e := sendMsgToGS(k, &args)
 		if e == nil {
 			oks++
 		}
@@ -278,7 +299,7 @@ func (gs *GridSdr) elect() {
 		gs.leader = gs.Addr
 		log.Printf("I'm the leader (%v).\n", gs.leader)
 		for k, _ := range gs.gsNodes.GetAll() {
-			args := RPCArgs{gs.ID, gs.Addr, common.CoordinateMsg, gs.clock.Geti64()}
+			args := gs.rpcArgsForGS(common.CoordinateMsg)
 			sendMsgToGS(k, &args) // NOTE: ok to fail the send, because nodes might be done
 		}
 	}
@@ -343,7 +364,7 @@ func (gs *GridSdr) ReplaceJobs(jobs *[]Job, reply *int) error {
 func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
 	gs.tasks <- func() (interface{}, error) {
 		// add jobs to the others
-		for k, _ := range gs.gsNodes.GetAll() {
+		for k := range gs.gsNodes.GetAll() {
 			addJobsToGS(k, jobs) // ok to fail
 		}
 		// add jobs to myself
@@ -384,6 +405,7 @@ func (gs *GridSdr) argsIsLater(args RPCArgs) bool {
 // respCritSection puts the critical section response into the response queue when it can't respond straight away.
 func (gs *GridSdr) respCritSection(args RPCArgs) {
 	resp := func() (interface{}, error) {
+		// NOTE: use gs.reqClock instead of the normal clock
 		sendMsgToGS(args.Addr, &RPCArgs{gs.ID, gs.Addr, common.MutexResp, gs.reqClock})
 		return 0, nil
 	}
