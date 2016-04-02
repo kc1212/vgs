@@ -90,7 +90,7 @@ func (gs *GridSdr) scheduleJobs() {
 		capacities := gs.getRMCapacities()
 		for k, v := range capacities {
 			jobs := takeJobs(int(v), gs.incomingJobs)
-			gs.jobsTask(jobs, k)
+			gs.addJobsTask(jobs, k)
 			if len(gs.incomingJobs) == 0 {
 				break
 			}
@@ -98,22 +98,22 @@ func (gs *GridSdr) scheduleJobs() {
 	}
 }
 
-func (gs *GridSdr) jobsTask(jobs []Job, rmAddr string) {
+func (gs *GridSdr) addJobsTask(jobs []Job, rmAddr string) {
 	gs.tasks <- func() (interface{}, error) {
 		// send the job to RM
 		reply, e := rpcAddJobsToRM(rmAddr, &jobs)
 
-		// TODO add jobs to the submitted list for all GSs
+		// add jobs to the submitted list for all GSs
+		for k := range gs.gsNodes.GetAll() {
+			rpcAddScheduledJobsToGS(k, &jobs)
+		}
+		jobsToChan(jobs, gs.scheduledJobs) // do it for myself too
 
 		// remove jobs from the incomingJobs list
-		len := len(jobs)
 		for k := range gs.gsNodes.GetAll() {
-			rpcDropJobsInGS(k, len)
+			rpcDropJobsInGS(k, len(jobs))
 		}
-
-		// remove the job in my own incomingJobs list
-		var not_used int
-		gs.DropJobs(&len, &not_used)
+		dropJobs(len(jobs), gs.incomingJobs) // do it for myself too
 
 		return reply, e
 	}
@@ -207,6 +207,18 @@ func rpcAddJobsToGS(addr string, jobs *[]Job) (int, error) {
 		return reply, e
 	}
 	common.RemoteCallNoFail(remote, "GridSdr.RecvJobs", jobs, &reply)
+	return reply, remote.Close()
+}
+
+func rpcAddScheduledJobsToGS(addr string, jobs *[]Job) (int, error) {
+	log.Printf("Sending scheduled jobs %v, to %v\n", *jobs, addr)
+	reply := -1
+	remote, e := rpc.DialHTTP("tcp", addr)
+	if e != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return reply, e
+	}
+	common.RemoteCallNoFail(remote, "GridSdr.RecvScheduledJobs", jobs, &reply)
 	return reply, remote.Close()
 }
 
@@ -369,7 +381,6 @@ func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
 }
 
 func (gs *GridSdr) DropJobs(n *int, reply *int) error {
-	log.Printf("dropping %v jobs\n", *n)
 	dropJobs(*n, gs.incomingJobs)
 	*reply = 0
 	return nil
