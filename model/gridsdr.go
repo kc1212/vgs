@@ -83,17 +83,34 @@ func (gs *GridSdr) imLeader() bool {
 
 func (gs *GridSdr) scheduleJobs() {
 	for {
-		if len(gs.incomingJobs) == 0 || !gs.imLeader() {
-			time.Sleep(time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
+
+		// try again later if I'm not leader
+		if !gs.imLeader() {
+			time.Sleep(time.Second)
 			continue
 		}
-		capacities := gs.getRMCapacities()
-		for k, v := range capacities {
-			jobs := takeJobs(int(v), gs.incomingJobs)
-			gs.addJobsTask(jobs, k)
-			if len(gs.incomingJobs) == 0 {
-				break
-			}
+
+		// try again later if there are no jobs
+		if len(gs.incomingJobs) == 0 {
+			continue
+		}
+
+		// try again later if no free RMs
+		addr, cap := gs.getNextFreeRM()
+		if cap == -1 || addr == "" {
+			continue
+		}
+
+		// schedule jobs if there are any
+		select {
+		case job := <-gs.incomingJobs:
+			rest := takeJobs(cap-1, gs.incomingJobs)
+			jobs := append(rest, job)
+			jobsToChan(jobs, gs.scheduledJobs)
+			gs.addJobsTask(jobs, addr)
+		case <-time.After(100 * time.Millisecond):
+			break
 		}
 	}
 }
@@ -107,13 +124,11 @@ func (gs *GridSdr) addJobsTask(jobs []Job, rmAddr string) {
 		for k := range gs.gsNodes.GetAll() {
 			rpcAddScheduledJobsToGS(k, &jobs)
 		}
-		jobsToChan(jobs, gs.scheduledJobs) // do it for myself too
 
 		// remove jobs from the incomingJobs list
 		for k := range gs.gsNodes.GetAll() {
 			rpcDropJobsInGS(k, len(jobs))
 		}
-		dropJobs(len(jobs), gs.incomingJobs) // do it for myself too
 
 		return reply, e
 	}
@@ -122,6 +137,17 @@ func (gs *GridSdr) addJobsTask(jobs []Job, rmAddr string) {
 // rpcArgsForGS sets default values for GS
 func (gs *GridSdr) rpcArgsForGS(msgType common.MsgType) RPCArgs {
 	return RPCArgs{gs.ID, gs.Addr, msgType, gs.clock.Geti64()}
+}
+
+// NOTE: there are various ways to improve this function, i.e. get the the RM with highest number of free workers
+func (gs *GridSdr) getNextFreeRM() (string, int) {
+	caps := gs.getRMCapacities()
+	for k, v := range caps {
+		if v > 0 {
+			return k, int(v)
+		}
+	}
+	return "", -1
 }
 
 func (gs *GridSdr) getRMCapacities() map[string]int64 {
