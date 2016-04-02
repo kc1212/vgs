@@ -228,9 +228,8 @@ func (gs *GridSdr) obtainCritSection() {
 
 	gs.mutexState.Set(common.StateWanted)
 
-	// empty the channel before starting just in case
-	for len(gs.mutexRespChan) > 0 {
-		<-gs.mutexRespChan
+	if len(gs.mutexRespChan) != 0 {
+		log.Panic("Nodes following the protocol shouldn't send more messages")
 	}
 
 	gs.clock.Tick()
@@ -253,10 +252,14 @@ func (gs *GridSdr) obtainCritSection() {
 		time.Sleep(time.Microsecond)
 	}
 
-	// empty the channel
-	// NOTE: nodes following the protocol shouldn't send more messages
-	for len(gs.mutexRespChan) > 0 {
-		<-gs.mutexRespChan
+	// now empty gs.mutexRespChan because we received all the messages
+loop:
+	for {
+		select {
+		case <-gs.mutexRespChan:
+		default:
+			break loop
+		}
 	}
 
 	// here we're in critical section
@@ -267,11 +270,16 @@ func (gs *GridSdr) obtainCritSection() {
 // releaseCritSection sets the mutexState to StateReleased and then runs all the queued requests.
 func (gs *GridSdr) releaseCritSection() {
 	gs.mutexState.Set(common.StateReleased)
-	for len(gs.mutexReqChan) > 0 {
-		resp := <-gs.mutexReqChan
-		_, e := resp()
-		if e != nil {
-			log.Panic("task failed with", e)
+loop:
+	for {
+		select {
+		case resp := <-gs.mutexReqChan:
+			_, e := resp()
+			if e != nil {
+				log.Panic("task failed with", e)
+			}
+		default:
+			break loop
 		}
 	}
 	log.Println("Out CS!", gs.ID)
@@ -382,18 +390,24 @@ func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
 // runTasks queries the tasks queue and if there are outstanding tasks it will request for critical and run the tasks.
 func (gs *GridSdr) runTasks() {
 	for {
-		// sleep for 100ms
+		// check whether there are tasks that needs running every 100ms
 		time.Sleep(100 * time.Millisecond)
-
-		// acquire CS, run the tasks, run for 1ms at most, then release CS
 		if len(gs.tasks) > 0 {
+			// acquire CS, run the tasks, run for 1ms at most, then release CS
 			gs.obtainCritSection()
-			t := time.Now().Add(time.Millisecond)
-			for t.After(time.Now()) && len(gs.tasks) > 0 {
-				task := <-gs.tasks
-				_, e := task()
-				if e != nil {
-					log.Panic("task failed with", e)
+			timeout := time.After(time.Millisecond)
+		inner_loop:
+			for {
+				select {
+				case task := <-gs.tasks:
+					_, e := task()
+					if e != nil {
+						log.Panic("task failed with", e)
+					}
+				case <-timeout:
+					break inner_loop
+				default:
+					break inner_loop
 				}
 			}
 			gs.releaseCritSection()
