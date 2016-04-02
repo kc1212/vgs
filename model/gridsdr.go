@@ -17,7 +17,7 @@ type GridSdr struct {
 	gsNodes       *common.SyncedSet // other grid schedulers, not including myself
 	rmNodes       *common.SyncedSet // the resource managers
 	leader        string            // the lead grid scheduler
-	jobs          []Job             // TODO this needs mutex around it
+	jobs          []Job             // no need mutex, job ops are all in critical section
 	tasks         chan common.Task  // these tasks require critical section (CS)
 	inElection    *common.SyncedVal
 	mutexRespChan chan int
@@ -82,11 +82,37 @@ func (gs *GridSdr) Run() {
 func (gs *GridSdr) scheduleJobs() {
 	if gs.leader == gs.Addr && anyJobHasStatus(common.Waiting, gs.jobs) {
 		rmCapacities := gs.getRMCapacities()
-		for k, v := range rmCapacities {
-			ids := idsOfNextNJobs(gs.jobs, v, common.Waiting)
-			gs.addJobSchedulingTask(k, ids)
+		gs.tasks <- func() (interface{}, error) {
+			for k, v := range rmCapacities {
+				ids := idsOfNextNJobs(gs.jobs, v, common.Waiting)
+				if len(ids) < 1 {
+					break
+				} else {
+					gs.addJobsToRMAndSync(k, ids) // TODO check return value
+				}
+			}
+			return 0, nil
 		}
 	}
+}
+
+// addJobsToRMAndSync sends the first `n` jobs to a resource manager at `rmAddr`, then updates jobs list on other GSs.
+func (gs *GridSdr) addJobsToRMAndSync(rmAddr string, ids []int64) (int, error) {
+	// send the job to the resman
+	jobsToSend := jobsFromIDs(ids, gs.jobs)
+	reply, e := addJobsToRM(rmAddr, &jobsToSend)
+
+	// update jobs status to Submitted if they have been successfully submitted
+	if e == nil {
+		gs.jobs = updateJobs(ids, gs.jobs, common.Submitted)
+	}
+
+	// update jobs on other GSs, ignore the error
+	for k := range gs.gsNodes.GetAll() {
+		replaceJobsInGS(k, &gs.jobs)
+	}
+
+	return reply, e
 }
 
 // rpcArgsForGS sets default values for GS
@@ -104,28 +130,6 @@ func (gs *GridSdr) getRMCapacities() map[string]int64 {
 		}
 	}
 	return capacities
-}
-
-// addJobSchedulingTask sends the first `n` jobs to a resource manager at `rmAddr`
-func (gs *GridSdr) addJobSchedulingTask(rmAddr string, ids []int64) {
-	// NOTE: remember tasks all run in CS
-	gs.tasks <- func() (interface{}, error) {
-		// send the job to the resman
-		jobsToSend := jobsFromIDs(ids, gs.jobs)
-		reply, e := addJobsToRM(rmAddr, &jobsToSend)
-
-		// update jobs status to Submitted if they have been successfully submitted
-		if e == nil {
-			gs.jobs = updateJobs(ids, gs.jobs, common.Submitted)
-		}
-
-		// update jobs on other GSs, ignore the error
-		for k := range gs.gsNodes.GetAll() {
-			replaceJobsInGS(k, &gs.jobs)
-		}
-
-		return reply, e
-	}
 }
 
 func (gs *GridSdr) notifyAndPopulateGSs(nodes []string) {
