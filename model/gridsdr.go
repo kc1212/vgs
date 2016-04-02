@@ -101,14 +101,14 @@ func (gs *GridSdr) scheduleJobs() {
 func (gs *GridSdr) jobsTask(jobs []Job, rmAddr string) {
 	gs.tasks <- func() (interface{}, error) {
 		// send the job to RM
-		reply, e := addJobsToRM(rmAddr, &jobs)
+		reply, e := rpcAddJobsToRM(rmAddr, &jobs)
 
 		// TODO add jobs to the submitted list for all GSs
 
 		// remove jobs from the incomingJobs list
 		len := len(jobs)
 		for k := range gs.gsNodes.GetAll() {
-			dropJobsInGS(k, len)
+			rpcDropJobsInGS(k, len)
 		}
 
 		// remove the job in my own incomingJobs list
@@ -128,7 +128,7 @@ func (gs *GridSdr) getRMCapacities() map[string]int64 {
 	capacities := make(map[string]int64)
 	args := gs.rpcArgsForGS(common.GetCapacityMsg)
 	for k := range gs.rmNodes.GetAll() {
-		x, e := sendMsgToRM(k, &args)
+		x, e := rpcSendMsgToRM(k, &args)
 		if e == nil {
 			capacities[k] = int64(x)
 		}
@@ -139,7 +139,7 @@ func (gs *GridSdr) getRMCapacities() map[string]int64 {
 func (gs *GridSdr) notifyAndPopulateGSs(nodes []string) {
 	args := gs.rpcArgsForGS(common.GSUpMsg)
 	for _, node := range nodes {
-		id, e := sendMsgToGS(node, &args)
+		id, e := rpcSendMsgToGS(node, &args)
 		if e == nil {
 			gs.gsNodes.SetInt(node, int64(id))
 		}
@@ -149,7 +149,7 @@ func (gs *GridSdr) notifyAndPopulateGSs(nodes []string) {
 func (gs *GridSdr) notifyAndPopulateRMs(nodes []string) {
 	args := gs.rpcArgsForGS(common.RMUpMsg)
 	for _, node := range nodes {
-		id, e := sendMsgToRM(node, &args)
+		id, e := rpcSendMsgToRM(node, &args)
 		if e == nil {
 			gs.rmNodes.SetInt(node, int64(id))
 		}
@@ -158,7 +158,7 @@ func (gs *GridSdr) notifyAndPopulateRMs(nodes []string) {
 
 // TODO we need to generalise those sendMsg/addJobs functions
 
-func sendMsgToRM(addr string, args *RPCArgs) (int, error) {
+func rpcSendMsgToRM(addr string, args *RPCArgs) (int, error) {
 	log.Printf("Sending message %v to %v\n", *args, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
@@ -170,8 +170,8 @@ func sendMsgToRM(addr string, args *RPCArgs) (int, error) {
 	return reply, remote.Close()
 }
 
-// addJobsToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
-func addJobsToRM(addr string, args *[]Job) (int, error) {
+// rpcAddJobsToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
+func rpcAddJobsToRM(addr string, args *[]Job) (int, error) {
 	log.Printf("Sending job to %v\n", addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
@@ -184,7 +184,7 @@ func addJobsToRM(addr string, args *[]Job) (int, error) {
 }
 
 // sendMsgToGS creates an RPC connection with another GridSdr and does one remote call on RecvMsg.
-func sendMsgToGS(addr string, args *RPCArgs) (int, error) {
+func rpcSendMsgToGS(addr string, args *RPCArgs) (int, error) {
 	log.Printf("Sending message %v to %v\n", *args, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
@@ -196,9 +196,9 @@ func sendMsgToGS(addr string, args *RPCArgs) (int, error) {
 	return reply, remote.Close()
 }
 
-// addJobsToGS is a remote call that calls `RecvJobs`.
+// rpcAddJobsToGS is a remote call that calls `RecvJobs`.
 // NOTE: this function should only be executed when CS is obtained.
-func addJobsToGS(addr string, jobs *[]Job) (int, error) {
+func rpcAddJobsToGS(addr string, jobs *[]Job) (int, error) {
 	log.Printf("Sending jobs %v, to %v\n", *jobs, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
@@ -210,7 +210,7 @@ func addJobsToGS(addr string, jobs *[]Job) (int, error) {
 	return reply, remote.Close()
 }
 
-func dropJobsInGS(addr string, n int) (int, error) {
+func rpcDropJobsInGS(addr string, n int) (int, error) {
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
@@ -239,7 +239,7 @@ func (gs *GridSdr) obtainCritSection() {
 	successes := 0
 	for k := range gs.gsNodes.GetAll() {
 		args := gs.rpcArgsForGS(common.MutexReq)
-		_, e := sendMsgToGS(k, &args)
+		_, e := rpcSendMsgToGS(k, &args)
 		if e == nil {
 			successes++
 		}
@@ -295,7 +295,7 @@ func (gs *GridSdr) elect() {
 			continue // do nothing to lower ids
 		}
 		args := gs.rpcArgsForGS(common.ElectionMsg)
-		_, e := sendMsgToGS(k, &args)
+		_, e := rpcSendMsgToGS(k, &args)
 		if e == nil {
 			oks++
 		}
@@ -308,7 +308,7 @@ func (gs *GridSdr) elect() {
 		log.Printf("I'm the leader (%v).\n", gs.leader)
 		for k, _ := range gs.gsNodes.GetAll() {
 			args := gs.rpcArgsForGS(common.CoordinateMsg)
-			sendMsgToGS(k, &args) // NOTE: ok to fail the send, because nodes might be done
+			rpcSendMsgToGS(k, &args) // NOTE: ok to fail the send, because nodes might be done
 		}
 	}
 
@@ -354,16 +354,22 @@ func (gs *GridSdr) RecvMsg(args *RPCArgs, reply *int) error {
 // RecvJobs appends new jobs into the jobs queue.
 // NOTE: this function should not be called directly by the client, it requires CS.
 func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
-	log.Printf("adding %v\n", *jobs)
-	for _, j := range *jobs {
-		gs.incomingJobs <- j
-	}
+	log.Printf("new incoming jobs %v\n", *jobs)
+	jobsToChan(*jobs, gs.incomingJobs)
+	*reply = 0
+	return nil
+}
+
+// NOTE: this function should not be called directly by the client, it requires CS.
+func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
+	log.Printf("adding scheduled jobs: %v\n", *jobs)
+	jobsToChan(*jobs, gs.scheduledJobs)
 	*reply = 0
 	return nil
 }
 
 func (gs *GridSdr) DropJobs(n *int, reply *int) error {
-	log.Printf("Dropping %v jobs\n", *n)
+	log.Printf("dropping %v jobs\n", *n)
 	dropJobs(*n, gs.incomingJobs)
 	*reply = 0
 	return nil
@@ -375,7 +381,7 @@ func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
 	gs.tasks <- func() (interface{}, error) {
 		// add jobs to the others
 		for k := range gs.gsNodes.GetAll() {
-			addJobsToGS(k, jobs) // ok to fail
+			rpcAddJobsToGS(k, jobs) // ok to fail
 		}
 		// add jobs to myself
 		reply := -1
@@ -422,7 +428,7 @@ func (gs *GridSdr) argsIsLater(args RPCArgs) bool {
 func (gs *GridSdr) respCritSection(args RPCArgs) {
 	resp := func() (interface{}, error) {
 		// NOTE: use gs.reqClock instead of the normal clock
-		sendMsgToGS(args.Addr, &RPCArgs{gs.ID, gs.Addr, common.MutexResp, gs.reqClock})
+		rpcSendMsgToGS(args.Addr, &RPCArgs{gs.ID, gs.Addr, common.MutexResp, gs.reqClock})
 		return 0, nil
 	}
 

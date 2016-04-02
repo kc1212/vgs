@@ -1,7 +1,5 @@
 package model
 
-import "math"
-
 import "github.com/kc1212/vgs/common"
 
 type Job struct {
@@ -61,17 +59,6 @@ func filterJobs(s []Job, fn func(Job) bool) []Job {
 	return p
 }
 
-// idsOfNextNJobs returns the ids of the next `n` jobs that matches st
-func idsOfNextNJobs(jobs []Job, n int64, st common.JobStatus) []int64 {
-	newJobs := filterJobs(jobs, func(j Job) bool { return j.Status == st })
-	ids := make([]int64, len(newJobs))
-	for i := range ids {
-		ids[i] = newJobs[i].ID
-	}
-	last := math.Min(float64(n-1), float64(len(newJobs)-1))
-	return ids[0:int64(last)]
-}
-
 func dropJobs(n int, c <-chan Job) {
 	for i := 0; i < n; i++ {
 		select {
@@ -95,4 +82,10 @@ loop:
 		}
 	}
 	return jobs
+}
+
+func jobsToChan(jobs []Job, c chan<- Job) {
+	for _, j := range jobs {
+		c <- j
+	}
 }

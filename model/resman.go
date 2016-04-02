@@ -72,7 +72,7 @@ func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 	// NOTE: does RM doesn't use a clock, hence the zero
 	arg := RPCArgs{rm.ID, rm.Addr, common.RMUpMsg, 0}
 	for _, node := range nodes {
-		id, e := sendMsgToGS(node, &arg)
+		id, e := rpcSendMsgToGS(node, &arg)
 		if e == nil {
 			rm.gsNodes.SetInt(node, int64(id))
 		}
