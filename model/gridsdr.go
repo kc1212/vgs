@@ -17,7 +17,8 @@ type GridSdr struct {
 	gsNodes       *common.SyncedSet // other grid schedulers, not including myself
 	rmNodes       *common.SyncedSet // the resource managers
 	leader        string            // the lead grid scheduler
-	jobs          []Job             // no need mutex, job ops are all in critical section
+	incomingJobs  chan Job          // when user adds a job, it comes here
+	scheduledJobs chan Job          // when GS schedules a job, it gets stored here
 	tasks         chan common.Task  // these tasks require critical section (CS)
 	inElection    *common.SyncedVal
 	mutexRespChan chan int
@@ -46,7 +47,8 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 	return GridSdr{
 		common.Node{id, addr, common.GSNode},
 		gsNodes, rmNodes, leader,
-		make([]Job, 0),
+		make(chan Job, 1000),
+		make(chan Job, 1000),
 		make(chan common.Task, 100),
 		&common.SyncedVal{V: false},
 		make(chan int, 100),
@@ -72,47 +74,49 @@ func (gs *GridSdr) Run() {
 	go gs.pollLeader()
 	go gs.runTasks()
 
-	for {
-		gs.scheduleJobs()
-		time.Sleep(time.Second)
-	}
+	gs.scheduleJobs()
 }
 
-// only schedule jobs when i'm the leader and there are jobs waiting to be scheduled
+func (gs *GridSdr) imLeader() bool {
+	return gs.leader == gs.Addr
+}
+
 func (gs *GridSdr) scheduleJobs() {
-	if gs.leader == gs.Addr && anyJobHasStatus(common.Waiting, gs.jobs) {
-		rmCapacities := gs.getRMCapacities()
-		gs.tasks <- func() (interface{}, error) {
-			for k, v := range rmCapacities {
-				ids := idsOfNextNJobs(gs.jobs, v, common.Waiting)
-				if len(ids) < 1 {
-					break
-				} else {
-					gs.addJobsToRMAndSync(k, ids) // TODO check return value
-				}
+	for {
+		if len(gs.incomingJobs) == 0 || !gs.imLeader() {
+			time.Sleep(time.Millisecond)
+			continue
+		}
+		capacities := gs.getRMCapacities()
+		for k, v := range capacities {
+			jobs := takeJobs(int(v), gs.incomingJobs)
+			gs.jobsTask(jobs, k)
+			if len(gs.incomingJobs) == 0 {
+				break
 			}
-			return 0, nil
 		}
 	}
 }
 
-// addJobsToRMAndSync sends the first `n` jobs to a resource manager at `rmAddr`, then updates jobs list on other GSs.
-func (gs *GridSdr) addJobsToRMAndSync(rmAddr string, ids []int64) (int, error) {
-	// send the job to the resman
-	jobsToSend := jobsFromIDs(ids, gs.jobs)
-	reply, e := addJobsToRM(rmAddr, &jobsToSend)
+func (gs *GridSdr) jobsTask(jobs []Job, rmAddr string) {
+	gs.tasks <- func() (interface{}, error) {
+		// send the job to RM
+		reply, e := addJobsToRM(rmAddr, &jobs)
 
-	// update jobs status to Submitted if they have been successfully submitted
-	if e == nil {
-		gs.jobs = updateJobs(ids, gs.jobs, common.Submitted)
+		// TODO add jobs to the submitted list for all GSs
+
+		// remove jobs from the incomingJobs list
+		len := len(jobs)
+		for k := range gs.gsNodes.GetAll() {
+			dropJobsInGS(k, len)
+		}
+
+		// remove the job in my own incomingJobs list
+		var not_used int
+		gs.DropJobs(&len, &not_used)
+
+		return reply, e
 	}
-
-	// update jobs on other GSs, ignore the error
-	for k := range gs.gsNodes.GetAll() {
-		replaceJobsInGS(k, &gs.jobs)
-	}
-
-	return reply, e
 }
 
 // rpcArgsForGS sets default values for GS
@@ -206,15 +210,14 @@ func addJobsToGS(addr string, jobs *[]Job) (int, error) {
 	return reply, remote.Close()
 }
 
-func replaceJobsInGS(addr string, jobs *[]Job) (int, error) {
-	log.Printf("Updating jobs %v, to %v\n", *jobs, addr)
+func dropJobsInGS(addr string, n int) (int, error) {
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 		return reply, e
 	}
-	common.RemoteCallNoFail(remote, "GridSdr.ReplaceJobs", jobs, &reply)
+	common.RemoteCallNoFail(remote, "GridSdr.DropJobs", &n, &reply)
 	return reply, remote.Close()
 }
 
@@ -253,14 +256,7 @@ func (gs *GridSdr) obtainCritSection() {
 	}
 
 	// now empty gs.mutexRespChan because we received all the messages
-loop:
-	for {
-		select {
-		case <-gs.mutexRespChan:
-		default:
-			break loop
-		}
-	}
+	common.EmptyIntChan(gs.mutexRespChan)
 
 	// here we're in critical section
 	gs.mutexState.Set(common.StateHeld)
@@ -359,14 +355,16 @@ func (gs *GridSdr) RecvMsg(args *RPCArgs, reply *int) error {
 // NOTE: this function should not be called directly by the client, it requires CS.
 func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
 	log.Printf("adding %v\n", *jobs)
-	gs.jobs = append(gs.jobs, (*jobs)...)
+	for _, j := range *jobs {
+		gs.incomingJobs <- j
+	}
 	*reply = 0
 	return nil
 }
 
-func (gs *GridSdr) ReplaceJobs(jobs *[]Job, reply *int) error {
-	log.Printf("adding %v\n", *jobs)
-	gs.jobs = *jobs
+func (gs *GridSdr) DropJobs(n *int, reply *int) error {
+	log.Printf("Dropping %v jobs\n", *n)
+	dropJobs(*n, gs.incomingJobs)
 	*reply = 0
 	return nil
 }

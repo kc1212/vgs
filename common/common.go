@@ -183,3 +183,20 @@ func SliceFromMap(mymap map[string]IntClient) []string {
 	}
 	return keys
 }
+
+func EmptyIntChan(c <-chan int) {
+	for {
+		select {
+		case <-c:
+		default:
+			return
+		}
+	}
+}
+
+func MinInt(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}

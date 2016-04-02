@@ -71,3 +71,28 @@ func idsOfNextNJobs(jobs []Job, n int64, st common.JobStatus) []int64 {
 	last := math.Min(float64(n-1), float64(len(newJobs)-1))
 	return ids[0:int64(last)]
 }
+
+func dropJobs(n int, c <-chan Job) {
+	for i := 0; i < n; i++ {
+		select {
+		case <-c:
+		default:
+			return
+		}
+	}
+}
+
+// takeJobs will take at most n jobs from channel `c`
+func takeJobs(n int, c <-chan Job) []Job {
+	jobs := *new([]Job)
+loop:
+	for i := 0; i < n; i++ {
+		select {
+		case job := <-c:
+			jobs = append(jobs, job)
+		default:
+			break loop
+		}
+	}
+	return jobs
+}
