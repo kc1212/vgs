@@ -115,7 +115,9 @@ func (gs *GridSdr) scheduleJobs() {
 	}
 }
 
+// addJobsTask pushes to tasks channel, it blocks until the task is completed
 func (gs *GridSdr) addJobsTask(jobs []Job, rmAddr string) {
+	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
 		// send the job to RM
 		reply, e := rpcAddJobsToRM(rmAddr, &jobs)
@@ -130,8 +132,10 @@ func (gs *GridSdr) addJobsTask(jobs []Job, rmAddr string) {
 			rpcDropJobsInGS(k, len(jobs))
 		}
 
+		c <- 0
 		return reply, e
 	}
+	<-c
 }
 
 // rpcArgsForGS sets default values for GS
@@ -412,9 +416,9 @@ func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 	return nil
 }
 
-// AddJobs is called by the client to add job(s) to the tasks queue.
+// AddJobsTask is called by the client to add job(s) to the tasks queue.
 // NOTE: this does not add jobs to the jobs queue, that is done by `runTasks`.
-func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
+func (gs *GridSdr) AddJobsTask(jobs *[]Job, reply *int) error {
 	gs.tasks <- func() (interface{}, error) {
 		// add jobs to the others
 		for k := range gs.gsNodes.GetAll() {

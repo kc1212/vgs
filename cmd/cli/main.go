@@ -35,7 +35,7 @@ func cli() {
 	if e != nil {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
 	}
-	if e := remote.Call("GridSdr.AddJobs", &jobs, &reply); e != nil {
+	if e := remote.Call("GridSdr.AddJobsTask", &jobs, &reply); e != nil {
 		log.Printf("Remote call GridSdr.RecvJobs failed on %v, %v\n", addr, e.Error())
 	}
 }

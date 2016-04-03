@@ -106,6 +106,9 @@ func (rm *ResMan) schedule() {
 		select {
 		case j := <-rm.jobsChan:
 			i := rm.nextFreeNode()
+			if i == -1 {
+				log.Panic("Couldn't find free node")
+			}
 			rm.workers[i].startJob(j)
 		}
 	}
