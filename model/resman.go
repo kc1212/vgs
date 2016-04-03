@@ -2,7 +2,6 @@ package model
 
 import (
 	"log"
-	"time"
 )
 
 import "github.com/kc1212/vgs/common"
@@ -35,8 +34,7 @@ func (rm *ResMan) Run() {
 
 	go discosrv.ImAlivePoll(rm.Addr, common.RMNode, rm.discosrvAddr)
 	go common.RunRPC(rm, rm.Addr)
-	go rm.schedule()
-	rm.startMainLoop()
+	rm.schedule()
 }
 
 // AddJob RPC call
@@ -53,7 +51,7 @@ func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
 
 // RecvMsg PRC call
 func (rm *ResMan) RecvMsg(args *RPCArgs, reply *int) error {
-	log.Printf("Msg received %v\n", *args)
+	// log.Printf("Msg received %v\n", *args)
 	*reply = -1
 	if args.Type == common.RMUpMsg {
 		*reply = rm.ID
@@ -76,16 +74,6 @@ func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 		if e == nil {
 			rm.gsNodes.SetInt(node, int64(id))
 		}
-	}
-}
-
-func (rm *ResMan) startMainLoop() {
-	log.Printf("Startin main loop\n")
-	for {
-		time.Sleep(time.Second)
-		// TODO receive messages from grid scheduler
-		// TODO update status of workers
-		// TODO schedule jobs
 	}
 }
 

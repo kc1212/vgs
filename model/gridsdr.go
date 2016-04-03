@@ -189,7 +189,7 @@ func (gs *GridSdr) notifyAndPopulateRMs(nodes []string) {
 // TODO we need to generalise those sendMsg/addJobs functions
 
 func rpcSendMsgToRM(addr string, args *RPCArgs) (int, error) {
-	log.Printf("Sending message %v to %v\n", *args, addr)
+	// log.Printf("Sending message %v to %v\n", *args, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
@@ -271,11 +271,11 @@ func (gs *GridSdr) obtainCritSection() {
 		log.Panicf("Should not be in CS, state: %v\n", gs)
 	}
 
-	gs.mutexState.Set(common.StateWanted)
-
 	if len(gs.mutexRespChan) != 0 {
 		log.Panic("Nodes following the protocol shouldn't send more messages")
 	}
+
+	gs.mutexState.Set(common.StateWanted)
 
 	gs.clock.Tick()
 	successes := 0
@@ -416,9 +416,9 @@ func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 	return nil
 }
 
-// AddJobsTask is called by the client to add job(s) to the tasks queue.
-// NOTE: this does not add jobs to the jobs queue, that is done by `runTasks`.
+// AddJobsTask is called by the client to add job(s) to the tasks queue, it returns when the job is synchronised.
 func (gs *GridSdr) AddJobsTask(jobs *[]Job, reply *int) error {
+	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
 		// add jobs to the others
 		for k := range gs.gsNodes.GetAll() {
@@ -427,8 +427,11 @@ func (gs *GridSdr) AddJobsTask(jobs *[]Job, reply *int) error {
 		// add jobs to myself
 		reply := -1
 		e := gs.RecvJobs(jobs, &reply)
+
+		c <- 0
 		return reply, e
 	}
+	<-c
 	return nil
 }
 
