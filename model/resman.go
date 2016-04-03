@@ -2,9 +2,6 @@ package model
 
 import (
 	"log"
-	"net"
-	"net/http"
-	"net/rpc"
 )
 
 import "github.com/kc1212/vgs/common"
@@ -12,87 +9,106 @@ import "github.com/kc1212/vgs/discosrv"
 
 type ResMan struct {
 	common.Node
-	workers []Worker
-	gsnodes []string
-	jobs    []Job
+	workers      []Worker
+	gsNodes      *common.SyncedSet
+	jobsChan     chan Job
+	discosrvAddr string
 }
 
-type ResManArgs struct {
-	Test int // TODO change this an actual job
+func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
+	return ResMan{
+		common.Node{ID: id, Addr: addr, Type: common.RMNode},
+		make([]Worker, n),
+		&common.SyncedSet{S: make(map[string]common.IntClient)},
+		make(chan Job, 1000),
+		dsAddr}
 }
 
 // RunResMan is the main function, it starts all its services.
-func RunResMan(n int, id int, addr string, dsAddr string) {
-	workers := make([]Worker, n)
-	// TODO make proper Node
-	reply, e := discosrv.ImAliveProbe(addr, common.RMNode, dsAddr)
+func (rm *ResMan) Run() {
+	reply, e := discosrv.ImAliveProbe(rm.Addr, common.RMNode, rm.discosrvAddr)
 	if e != nil {
-		log.Panicf("Discosrv on %v not online\n", dsAddr)
+		log.Panicf("Discosrv on %v not online\n", rm.discosrvAddr)
 	}
-	rm := ResMan{common.Node{ID: id, Addr: addr, Type: common.RMNode}, workers, reply.GSs, *new([]Job)}
+	rm.notifyAndPopulateGSs(reply.GSs)
 
-	go discosrv.ImAlivePoll(addr, common.RMNode, dsAddr)
-	go common.RunRPC(rm, addr)
-	rm.startMainLoop()
+	go discosrv.ImAlivePoll(rm.Addr, common.RMNode, rm.discosrvAddr)
+	go common.RunRPC(rm, rm.Addr)
+	rm.schedule()
 }
 
-// the RPC function
-func (rm *ResMan) AddJob(args *ResManArgs, reply *int) error {
-	log.Printf("Message received %v\n", *args)
-	// rm.jobs = append(rm.jobs, args.JobArg)
+// AddJob RPC call
+func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
+	log.Printf("Jobs received %v\n", *jobs)
+
+	// make a channel of jobs, and then schedule them
+	for _, j := range *jobs {
+		rm.jobsChan <- j
+	}
 	*reply = 1
 	return nil
 }
 
-func (rm *ResMan) startRPC(port string) {
-	// initialise RPC
-	log.Printf("Initialising RPC on port %v\n", port)
-	rpc.Register(rm)
-	rpc.HandleHTTP()
-	l, e := net.Listen("tcp", port)
-	if e != nil {
-		log.Fatal("listen error:", e)
+// RecvMsg PRC call
+func (rm *ResMan) RecvMsg(args *RPCArgs, reply *int) error {
+	// log.Printf("Msg received %v\n", *args)
+	*reply = -1
+	if args.Type == common.RMUpMsg {
+		*reply = rm.ID
+		rm.gsNodes.SetInt(args.Addr, int64(args.ID))
+
+	} else if args.Type == common.GetCapacityMsg {
+		*reply = rm.computeCapacity()
+
+	} else {
+		log.Panic("Invalid message!", args)
 	}
-	go http.Serve(l, nil)
+	return nil
 }
 
-func (rm *ResMan) startMainLoop() {
-	log.Printf("Startin main loop\n")
-	for {
+func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
+	// NOTE: does RM doesn't use a clock, hence the zero
+	arg := RPCArgs{rm.ID, rm.Addr, common.RMUpMsg, 0}
+	for _, node := range nodes {
+		id, e := rpcSendMsgToGS(node, &arg)
+		if e == nil {
+			rm.gsNodes.SetInt(node, int64(id))
+		}
 	}
-	// TODO receive messages from grid scheduler
-	// TODO update status of workers
-	// TODO schedule jobs
+}
+
+// computeCapacity computes the collective remaining capacity of the worker nodes.
+func (rm *ResMan) computeCapacity() int {
+	cnt := 0
+	for _, w := range rm.workers {
+		if !w.isRunning() {
+			cnt++
+		}
+	}
+	return cnt
+}
+
+// greedy scheduler
+func (rm *ResMan) schedule() {
+	for {
+		select {
+		case j := <-rm.jobsChan:
+			i := rm.nextFreeNode()
+			if i == -1 {
+				log.Panic("Couldn't find free node")
+			}
+			rm.workers[i].startJob(j)
+		}
+	}
 }
 
 func (rm *ResMan) nextFreeNode() int {
 	// TODO looping over all workers is inefficient
 	// because the low idx workers are always assigned first
 	for i := range rm.workers {
-		if !rm.workers[i].running {
+		if !rm.workers[i].isRunning() {
 			return i
 		}
 	}
 	return -1
-}
-
-// greedy scheduler
-func (rm *ResMan) schedule() {
-	x := rm.nextFreeNode()
-	if x > -1 {
-		// assigning the job will also remove it from the job queue
-		rm.assign(x)
-	}
-}
-
-// always assign the very next job in queue?
-// the node should already be free before calling this function
-func (rm *ResMan) assign(idx int) {
-	j := rm.jobs[0]
-	rm.workers[idx].startJob(j)
-	rm.jobs = rm.jobs[1:] // remove the very first job
-}
-
-func (rm ResMan) logStatus() {
-	log.Printf("ResMan: %v jobs and %v workers\n", len(rm.jobs), len(rm.workers))
 }
