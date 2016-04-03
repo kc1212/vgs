@@ -21,13 +21,18 @@ func main() {
 func cli() {
 	addr := flag.String("addr", "localhost:3000", "address:port of the grid scheduler")
 	jobsCount := flag.Int("count", 1, "the number of jobs to add")
+	duration := flag.Int64("duration", 0, "the duration for the jobs (default is a random value)")
 	flag.Parse()
 
 	rand.Seed(time.Now().UTC().UnixNano())
 	jobs := make([]model.Job, *jobsCount)
 	for i := range jobs {
 		jobs[i].ID = rand.Int63()
-		jobs[i].Duration = rand.Int63n(10)
+		if *duration == 0 {
+			jobs[i].Duration = rand.Int63n(10) + 1
+		} else {
+			jobs[i].Duration = *duration
+		}
 	}
 
 	reply := -1

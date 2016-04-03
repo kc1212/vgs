@@ -23,7 +23,7 @@ func rpcSendMsgToRM(addr string, args *RPCArgs) (int, error) {
 
 // rpcAddJobsToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
 func rpcAddJobsToRM(addr string, args *[]Job) (int, error) {
-	log.Printf("Sending job to %v\n", addr)
+	log.Printf("Sending job to RM on %v\n", addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
@@ -36,7 +36,7 @@ func rpcAddJobsToRM(addr string, args *[]Job) (int, error) {
 
 // sendMsgToGS creates an RPC connection with another GridSdr and does one remote call on RecvMsg.
 func rpcSendMsgToGS(addr string, args *RPCArgs) (int, error) {
-	log.Printf("Sending message %v to %v\n", *args, addr)
+	log.Printf("Sending message %v to GS on %v\n", *args, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
@@ -49,8 +49,8 @@ func rpcSendMsgToGS(addr string, args *RPCArgs) (int, error) {
 
 // rpcAddJobsToGS is a remote call that calls `RecvJobs`.
 // NOTE: this function should only be executed when CS is obtained.
-func rpcAddJobsToGS(addr string, jobs *[]Job) (int, error) {
-	log.Printf("Sending jobs %v, to %v\n", *jobs, addr)
+func rpcSyncJobsWithGS(addr string, jobs *[]Job) (int, error) {
+	log.Printf("Syncing jobs %v with GS on %v\n", *jobs, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
@@ -61,8 +61,8 @@ func rpcAddJobsToGS(addr string, jobs *[]Job) (int, error) {
 	return reply, remote.Close()
 }
 
-func rpcAddScheduledJobsToGS(addr string, jobs *[]Job) (int, error) {
-	log.Printf("Sending scheduled jobs %v, to %v\n", *jobs, addr)
+func rpcSyncScheduledJobsWithGS(addr string, jobs *[]Job) (int, error) {
+	log.Printf("Syncing scheduled jobs %v with GS %v\n", *jobs, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {

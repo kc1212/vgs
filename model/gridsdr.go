@@ -124,7 +124,7 @@ func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
 
 		// add jobs to the submitted list for all GSs
 		for k := range gs.gsNodes.GetAll() {
-			rpcAddScheduledJobsToGS(k, &jobs)
+			rpcSyncScheduledJobsWithGS(k, &jobs)
 		}
 
 		// remove jobs from the incomingJobs list
@@ -352,7 +352,7 @@ func (gs *GridSdr) AddJobsTask(jobs *[]Job, reply *int) error {
 	gs.tasks <- func() (interface{}, error) {
 		// add jobs to the others
 		for k := range gs.gsNodes.GetAll() {
-			rpcAddJobsToGS(k, jobs) // ok to fail
+			rpcSyncJobsWithGS(k, jobs) // ok to fail
 		}
 		// add jobs to myself
 		reply := -1
