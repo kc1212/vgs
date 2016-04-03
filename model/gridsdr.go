@@ -60,7 +60,7 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 	}
 }
 
-// Run is the main function for GridSdr, it starts all its services.
+// Run is the main function for GridSdr, it starts all its services, do not run it more than once.
 func (gs *GridSdr) Run() {
 	reply, e := discosrv.ImAliveProbe(gs.Addr, gs.Type, gs.discosrvAddr)
 	if e != nil {
@@ -108,15 +108,15 @@ func (gs *GridSdr) scheduleJobs() {
 			rest := takeJobs(cap-1, gs.incomingJobs)
 			jobs := append(rest, job)
 			jobsToChan(jobs, gs.scheduledJobs)
-			gs.addJobsTask(jobs, addr)
+			gs.runJobsTask(jobs, addr) // this function blocks util the task finishes executing
 		case <-time.After(100 * time.Millisecond):
 			break
 		}
 	}
 }
 
-// addJobsTask pushes to tasks channel, it blocks until the task is completed
-func (gs *GridSdr) addJobsTask(jobs []Job, rmAddr string) {
+// runJobsTask pushes to tasks channel, it blocks until the task is completed
+func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
 		// send the job to RM
@@ -186,83 +186,6 @@ func (gs *GridSdr) notifyAndPopulateRMs(nodes []string) {
 	}
 }
 
-// TODO we need to generalise those sendMsg/addJobs functions
-
-func rpcSendMsgToRM(addr string, args *RPCArgs) (int, error) {
-	// log.Printf("Sending message %v to %v\n", *args, addr)
-	reply := -1
-	remote, e := rpc.DialHTTP("tcp", addr)
-	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return reply, e
-	}
-	common.RemoteCallNoFail(remote, "ResMan.RecvMsg", args, &reply)
-	return reply, remote.Close()
-}
-
-// rpcAddJobsToRM creates an RPC connection with a ResMan and does one remote call on AddJob.
-func rpcAddJobsToRM(addr string, args *[]Job) (int, error) {
-	log.Printf("Sending job to %v\n", addr)
-	reply := -1
-	remote, e := rpc.DialHTTP("tcp", addr)
-	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return reply, e
-	}
-	common.RemoteCallNoFail(remote, "ResMan.AddJob", args, &reply)
-	return reply, remote.Close()
-}
-
-// sendMsgToGS creates an RPC connection with another GridSdr and does one remote call on RecvMsg.
-func rpcSendMsgToGS(addr string, args *RPCArgs) (int, error) {
-	log.Printf("Sending message %v to %v\n", *args, addr)
-	reply := -1
-	remote, e := rpc.DialHTTP("tcp", addr)
-	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return reply, e
-	}
-	common.RemoteCallNoFail(remote, "GridSdr.RecvMsg", args, &reply)
-	return reply, remote.Close()
-}
-
-// rpcAddJobsToGS is a remote call that calls `RecvJobs`.
-// NOTE: this function should only be executed when CS is obtained.
-func rpcAddJobsToGS(addr string, jobs *[]Job) (int, error) {
-	log.Printf("Sending jobs %v, to %v\n", *jobs, addr)
-	reply := -1
-	remote, e := rpc.DialHTTP("tcp", addr)
-	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return reply, e
-	}
-	common.RemoteCallNoFail(remote, "GridSdr.RecvJobs", jobs, &reply)
-	return reply, remote.Close()
-}
-
-func rpcAddScheduledJobsToGS(addr string, jobs *[]Job) (int, error) {
-	log.Printf("Sending scheduled jobs %v, to %v\n", *jobs, addr)
-	reply := -1
-	remote, e := rpc.DialHTTP("tcp", addr)
-	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return reply, e
-	}
-	common.RemoteCallNoFail(remote, "GridSdr.RecvScheduledJobs", jobs, &reply)
-	return reply, remote.Close()
-}
-
-func rpcDropJobsInGS(addr string, n int) (int, error) {
-	reply := -1
-	remote, e := rpc.DialHTTP("tcp", addr)
-	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return reply, e
-	}
-	common.RemoteCallNoFail(remote, "GridSdr.DropJobs", &n, &reply)
-	return reply, remote.Close()
-}
-
 // obtainCritSection implements most of the Ricart-Agrawala algorithm, it sends the critical section request and then wait for responses until some timeout.
 // Initially we set the mutexState to StateWanted, if the critical section is obtained we set it to StateHeld.
 // NOTE: this function isn't designed to be thread safe, it is run periodically in `runTasks`.
@@ -289,15 +212,23 @@ func (gs *GridSdr) obtainCritSection() {
 	gs.reqClock = gs.clock.Geti64()
 
 	// wait until others has written to mutexRespChan or time out (2s)
-	t := time.Now().Add(2 * time.Second)
-	for t.After(time.Now()) {
-		if len(gs.mutexRespChan) >= successes {
+	cnt := 0
+	timeout := time.After(2 * time.Second)
+loop:
+	for {
+		if cnt >= successes {
 			break
 		}
-		time.Sleep(time.Microsecond)
+		select {
+		case <-gs.mutexRespChan:
+			cnt++
+		case <-timeout:
+			break loop
+		}
 	}
 
 	// now empty gs.mutexRespChan because we received all the messages
+	// NOTE: probably not necessary
 	common.EmptyIntChan(gs.mutexRespChan)
 
 	// here we're in critical section
@@ -308,19 +239,18 @@ func (gs *GridSdr) obtainCritSection() {
 // releaseCritSection sets the mutexState to StateReleased and then runs all the queued requests.
 func (gs *GridSdr) releaseCritSection() {
 	gs.mutexState.Set(common.StateReleased)
-loop:
 	for {
 		select {
-		case resp := <-gs.mutexReqChan:
-			_, e := resp()
+		case req := <-gs.mutexReqChan:
+			_, e := req()
 			if e != nil {
-				log.Panic("task failed with", e)
+				log.Panic("request failed with", e)
 			}
 		default:
-			break loop
+			log.Println("Out CS!", gs.ID)
+			return
 		}
 	}
-	log.Println("Out CS!", gs.ID)
 }
 
 // elect implements the Bully algorithm.
@@ -490,7 +420,7 @@ func (gs *GridSdr) pollLeader() {
 		time.Sleep(time.Second)
 
 		// don't do anything if election is running or I'm leader
-		if gs.inElection.Get().(bool) || gs.Addr == gs.leader {
+		if gs.inElection.Get().(bool) || gs.imLeader() {
 			continue
 		}
 
