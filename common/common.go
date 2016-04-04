@@ -173,16 +173,18 @@ func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply int
 	return e
 }
 
-func DialAndCallNoFail(addr string, fn string, args interface{}) (interface{}, error) {
-	var reply interface{}
-	// reply := -1
-	remote, e := rpc.DialHTTP("tcp", addr)
-	if e != nil {
+// TODO is there a way to make the reply generic?
+func DialAndCallNoFail(addr string, fn string, args interface{}) (int, error) {
+	// var reply interface{}
+	reply := -1
+	remote, e1 := rpc.DialHTTP("tcp", addr)
+	if e1 != nil {
 		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return reply, e
+		return reply, e1
 	}
-	RemoteCallNoFail(remote, fn, args, reply)
-	return reply, remote.Close()
+	defer remote.Close()
+	e2 := RemoteCallNoFail(remote, fn, args, &reply)
+	return reply, e2
 }
 
 func SliceFromMap(mymap map[string]IntClient) []string {
@@ -204,6 +206,21 @@ func EmptyIntChan(c <-chan int) {
 			return
 		}
 	}
+}
+
+// TakeAllInt64Chan returns a list with all the values in the buffered channel
+func TakeAllInt64Chan(c <-chan int64) []int64 {
+	res := make([]int64, 0)
+loop:
+	for {
+		select {
+		case v := <-c:
+			res = append(res, v)
+		default:
+			break loop
+		}
+	}
+	return res
 }
 
 func MinInt(a int, b int) int {

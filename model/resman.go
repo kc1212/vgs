@@ -10,12 +10,13 @@ import "github.com/kc1212/virtual-grid/discosrv"
 
 type ResMan struct {
 	common.Node
-	n            int // number of workers
-	gsNodes      *common.SyncedSet
-	tasksChan    chan WorkerTask
-	capReq       chan int
-	capResp      chan int
-	discosrvAddr string
+	n             int // number of workers
+	gsNodes       *common.SyncedSet
+	tasksChan     chan WorkerTask
+	completedChan chan int64
+	capReq        chan int
+	capResp       chan int
+	discosrvAddr  string
 }
 
 func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
@@ -24,6 +25,7 @@ func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 		n,
 		&common.SyncedSet{S: make(map[string]common.IntClient)},
 		make(chan WorkerTask, 1000),
+		make(chan int64),
 		make(chan int),
 		make(chan int),
 		dsAddr}
@@ -39,7 +41,8 @@ func (rm *ResMan) Run() {
 
 	go discosrv.ImAlivePoll(rm.Addr, common.RMNode, rm.discosrvAddr)
 	go common.RunRPC(rm, rm.Addr)
-	runWorkers(rm.n, rm.tasksChan, rm.capReq, rm.capResp)
+	go runWorkers(rm.n, rm.tasksChan, rm.capReq, rm.capResp, rm.completedChan)
+	rm.handleCompletionMsg()
 }
 
 // AddJob RPC call
@@ -89,6 +92,26 @@ func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 		id, e := rpcSendMsgToGS(node, &arg)
 		if e == nil {
 			rm.gsNodes.SetInt(node, int64(id))
+		}
+	}
+}
+
+func (rm *ResMan) handleCompletionMsg() {
+	for {
+		select {
+		case jobID := <-rm.completedChan:
+			rest := common.TakeAllInt64Chan(rm.completedChan)
+			ids := append(rest, jobID) // TODO this really should be prepend
+
+			// run rpcSyncCompletedJobs with one of the GSs
+			for k := range rm.gsNodes.GetAll() {
+				_, e := rpcSyncCompletedJobs(k, &ids)
+				if e == nil {
+					break
+				}
+			}
+		default: // sleep instead of timeout because we want to send completed messages in a batch
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }

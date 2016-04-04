@@ -106,7 +106,7 @@ func (gs *GridSdr) scheduleJobs() {
 		select {
 		case job := <-gs.incomingJobs:
 			rest := takeJobs(cap-1, gs.incomingJobs)
-			jobs := append(rest, job)
+			jobs := append(rest, job) // TODO this really should be prepend
 			jobsToChan(jobs, gs.scheduledJobs)
 			gs.runJobsTask(jobs, addr) // this function blocks util the task finishes executing
 		case <-time.After(100 * time.Millisecond):
@@ -124,12 +124,12 @@ func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
 
 		// add jobs to the submitted list for all GSs
 		for k := range gs.gsNodes.GetAll() {
-			rpcSyncScheduledJobs_GS(k, &jobs)
+			rpcSyncScheduledJobs(k, &jobs)
 		}
 
 		// remove jobs from the incomingJobs list
 		for k := range gs.gsNodes.GetAll() {
-			rpcDropJobs_GS(k, len(jobs))
+			rpcDropJobs(k, len(jobs))
 		}
 
 		c <- 0
@@ -348,18 +348,27 @@ func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 
 // SyncCompletedJobs is called by the RM when job(s) are completed.
 // We acquire a critical section and propogate the change to everybody.
-func (gs *GridSdr) SyncCompletedJobs(js *[]int, reply *int) error {
+func (gs *GridSdr) SyncCompletedJobs(js *[]int64, reply *int) error {
+	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
+		for k := range gs.gsNodes.GetAll() {
+			rpcRemoveCompletedJobs(k, js)
 
+			// TODO remove it from myself too
+			log.Printf("I'm removing jobs %v.\n", *js)
+		}
+		c <- 0
 		return 0, nil
 	}
-	// dropJobs(*n, gs.incomingJobs)
+	<-c
 	*reply = 0
 	return nil
 }
 
 // RemoveCompletedJobs is called by another GS to remove job(s) from the scheduledJobs
 func (gs *GridSdr) RemoveCompletedJobs(js *[]int, reply *int) error {
+	log.Printf("I'm removing jobs %v.\n", *js)
+	*reply = 0
 	return nil
 }
 
@@ -369,16 +378,17 @@ func (gs *GridSdr) AddJobsTask(jobs *[]Job, reply *int) error {
 	gs.tasks <- func() (interface{}, error) {
 		// add jobs to the others
 		for k := range gs.gsNodes.GetAll() {
-			rpcSyncJobs_GS(k, jobs) // ok to fail
+			rpcSyncJobs(k, jobs) // ok to fail
 		}
 		// add jobs to myself
-		reply := -1
-		e := gs.RecvJobs(jobs, &reply)
+		r := -1
+		e := gs.RecvJobs(jobs, &r)
 
 		c <- 0
-		return reply, e
+		return r, e
 	}
 	<-c
+	*reply = 0
 	return nil
 }
 

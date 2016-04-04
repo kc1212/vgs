@@ -35,7 +35,13 @@ func work(workerID int64, resultChan chan<- WorkerDone) chan WorkerTask {
 }
 
 // runWorkers receives tasks and schedules them to workers using a greedy algorithm
-func runWorkers(n int, tasksChan <-chan WorkerTask, capReq <-chan int, capResp chan<- int) {
+// NOTE: think about making this into a generator function like `work`.
+func runWorkers(n int,
+	tasksChan <-chan WorkerTask,
+	capReq <-chan int,
+	capResp chan<- int,
+	completionChan chan<- int64) {
+
 	// initialisation
 	doneChan := make(chan WorkerDone)
 	busyFlags := make([]bool, n) // one flag per worker
@@ -65,7 +71,7 @@ func runWorkers(n int, tasksChan <-chan WorkerTask, capReq <-chan int, capResp c
 			workerChans[i] <- task
 		case done := <-doneChan:
 			busyFlags[done.workerID] = false
-			// TODO inform GS
+			completionChan <- done.jobID
 		}
 	}
 }
