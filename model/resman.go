@@ -2,6 +2,7 @@ package model
 
 import (
 	"log"
+	"time"
 )
 
 import "github.com/kc1212/virtual-grid/common"
@@ -9,18 +10,22 @@ import "github.com/kc1212/virtual-grid/discosrv"
 
 type ResMan struct {
 	common.Node
-	workers      []Worker
+	n            int // number of workers
 	gsNodes      *common.SyncedSet
-	jobsChan     chan Job
+	tasksChan    chan WorkerTask
+	capReq       chan int
+	capResp      chan int
 	discosrvAddr string
 }
 
 func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 	return ResMan{
 		common.Node{ID: id, Addr: addr, Type: common.RMNode},
-		make([]Worker, n),
+		n,
 		&common.SyncedSet{S: make(map[string]common.IntClient)},
-		make(chan Job, 1000),
+		make(chan WorkerTask, 1000),
+		make(chan int),
+		make(chan int),
 		dsAddr}
 }
 
@@ -34,7 +39,7 @@ func (rm *ResMan) Run() {
 
 	go discosrv.ImAlivePoll(rm.Addr, common.RMNode, rm.discosrvAddr)
 	go common.RunRPC(rm, rm.Addr)
-	rm.schedule()
+	runWorkers(rm.n, rm.tasksChan, rm.capReq, rm.capResp)
 }
 
 // AddJob RPC call
@@ -43,9 +48,14 @@ func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
 
 	// make a channel of jobs, and then schedule them
 	for _, j := range *jobs {
-		rm.jobsChan <- j
+		// in theory the task can be arbitrary, here we just run Sleep
+		task := func() (interface{}, error) {
+			time.Sleep(time.Duration(j.Duration) * time.Second)
+			return 0, nil
+		}
+		rm.tasksChan <- WorkerTask{task, j.ID}
 	}
-	*reply = 1
+	*reply = 0
 	return nil
 }
 
@@ -66,6 +76,12 @@ func (rm *ResMan) RecvMsg(args *RPCArgs, reply *int) error {
 	return nil
 }
 
+func (rm *ResMan) computeCapacity() int {
+	rm.capReq <- 0
+	cap := <-rm.capResp
+	return cap
+}
+
 func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 	// NOTE: does RM doesn't use a clock, hence the zero
 	arg := RPCArgs{rm.ID, rm.Addr, common.RMUpMsg, 0}
@@ -75,40 +91,4 @@ func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 			rm.gsNodes.SetInt(node, int64(id))
 		}
 	}
-}
-
-// computeCapacity computes the collective remaining capacity of the worker nodes.
-func (rm *ResMan) computeCapacity() int {
-	cnt := 0
-	for _, w := range rm.workers {
-		if !w.isRunning() {
-			cnt++
-		}
-	}
-	return cnt
-}
-
-// greedy scheduler
-func (rm *ResMan) schedule() {
-	for {
-		select {
-		case j := <-rm.jobsChan:
-			i := rm.nextFreeNode()
-			if i == -1 {
-				log.Panic("Couldn't find free node")
-			}
-			rm.workers[i].startJob(j)
-		}
-	}
-}
-
-func (rm *ResMan) nextFreeNode() int {
-	// TODO looping over all workers is inefficient
-	// because the low idx workers are always assigned first
-	for i := range rm.workers {
-		if !rm.workers[i].isRunning() {
-			return i
-		}
-	}
-	return -1
 }

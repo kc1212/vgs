@@ -10,7 +10,7 @@ import "github.com/kc1212/virtual-grid/common"
 // TODO a lot of repeated code here, need to be generalised
 
 func rpcSendMsgToRM(addr string, args *RPCArgs) (int, error) {
-	// log.Printf("Sending message %v to %v\n", *args, addr)
+	log.Printf("Sending message %v to %v\n", *args, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
 	if e != nil {
