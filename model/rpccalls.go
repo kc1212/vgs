@@ -49,7 +49,7 @@ func rpcSendMsgToGS(addr string, args *RPCArgs) (int, error) {
 
 // rpcAddJobsToGS is a remote call that calls `RecvJobs`.
 // NOTE: this function should only be executed when CS is obtained.
-func rpcSyncJobsWithGS(addr string, jobs *[]Job) (int, error) {
+func rpcSyncJobs_GS(addr string, jobs *[]Job) (int, error) {
 	log.Printf("Syncing jobs %v with GS on %v\n", *jobs, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
@@ -61,7 +61,7 @@ func rpcSyncJobsWithGS(addr string, jobs *[]Job) (int, error) {
 	return reply, remote.Close()
 }
 
-func rpcSyncScheduledJobsWithGS(addr string, jobs *[]Job) (int, error) {
+func rpcSyncScheduledJobs_GS(addr string, jobs *[]Job) (int, error) {
 	log.Printf("Syncing scheduled jobs %v with GS %v\n", *jobs, addr)
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", addr)
@@ -73,13 +73,17 @@ func rpcSyncScheduledJobsWithGS(addr string, jobs *[]Job) (int, error) {
 	return reply, remote.Close()
 }
 
-func rpcDropJobsInGS(addr string, n int) (int, error) {
-	reply := -1
-	remote, e := rpc.DialHTTP("tcp", addr)
-	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", addr)
-		return reply, e
-	}
-	common.RemoteCallNoFail(remote, "GridSdr.DropJobs", &n, &reply)
-	return reply, remote.Close()
+func rpcDropJobs_GS(addr string, n int) (int, error) {
+	reply, e := common.DialAndCallNoFail(addr, "GridSdr.DropJobs", &n)
+	return reply.(int), e
+}
+
+func rpcSyncCompletedJobs(addr string, js []int64) (int, error) {
+	reply, e := common.DialAndCallNoFail(addr, "GridSdr.SyncCompletedJobs", &js)
+	return reply.(int), e
+}
+
+func rpcRemoveCompletedJobs(addr string, js []int64) (int, error) {
+	reply, e := common.DialAndCallNoFail(addr, "GridSdr.RemoveCompletedJobs", &js)
+	return reply.(int), e
 }

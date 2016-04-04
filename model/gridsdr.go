@@ -124,12 +124,12 @@ func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
 
 		// add jobs to the submitted list for all GSs
 		for k := range gs.gsNodes.GetAll() {
-			rpcSyncScheduledJobsWithGS(k, &jobs)
+			rpcSyncScheduledJobs_GS(k, &jobs)
 		}
 
 		// remove jobs from the incomingJobs list
 		for k := range gs.gsNodes.GetAll() {
-			rpcDropJobsInGS(k, len(jobs))
+			rpcDropJobs_GS(k, len(jobs))
 		}
 
 		c <- 0
@@ -346,13 +346,30 @@ func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 	return nil
 }
 
+// SyncCompletedJobs is called by the RM when job(s) are completed.
+// We acquire a critical section and propogate the change to everybody.
+func (gs *GridSdr) SyncCompletedJobs(js *[]int, reply *int) error {
+	gs.tasks <- func() (interface{}, error) {
+
+		return 0, nil
+	}
+	// dropJobs(*n, gs.incomingJobs)
+	*reply = 0
+	return nil
+}
+
+// RemoveCompletedJobs is called by another GS to remove job(s) from the scheduledJobs
+func (gs *GridSdr) RemoveCompletedJobs(js *[]int, reply *int) error {
+	return nil
+}
+
 // AddJobsTask is called by the client to add job(s) to the tasks queue, it returns when the job is synchronised.
 func (gs *GridSdr) AddJobsTask(jobs *[]Job, reply *int) error {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
 		// add jobs to the others
 		for k := range gs.gsNodes.GetAll() {
-			rpcSyncJobsWithGS(k, jobs) // ok to fail
+			rpcSyncJobs_GS(k, jobs) // ok to fail
 		}
 		// add jobs to myself
 		reply := -1

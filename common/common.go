@@ -173,6 +173,18 @@ func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply int
 	return e
 }
 
+func DialAndCallNoFail(addr string, fn string, args interface{}) (interface{}, error) {
+	var reply interface{}
+	// reply := -1
+	remote, e := rpc.DialHTTP("tcp", addr)
+	if e != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return reply, e
+	}
+	RemoteCallNoFail(remote, fn, args, reply)
+	return reply, remote.Close()
+}
+
 func SliceFromMap(mymap map[string]IntClient) []string {
 	keys := make([]string, len(mymap))
 
