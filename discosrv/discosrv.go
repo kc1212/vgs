@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-import "github.com/kc1212/vgs/common"
+import "github.com/kc1212/virtual-grid/common"
 
 type DiscoSrv struct {
 	gsSet *common.SyncedSet

@@ -5,7 +5,7 @@ import (
 	"net"
 )
 
-import "github.com/kc1212/vgs/discosrv"
+import "github.com/kc1212/virtual-grid/discosrv"
 
 func main() {
 	defaultAddr := net.JoinHostPort("localhost", "3333")

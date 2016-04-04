@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-import "github.com/kc1212/vgs/model"
+import "github.com/kc1212/virtual-grid/model"
 
 // TODO add interactive option
 func main() {
