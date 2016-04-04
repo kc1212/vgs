@@ -6,7 +6,7 @@ all: $(execs)
 
 $(execs):
 	mkdir -p bin
-	go build -v  -o bin/$@ github.com/kc1212/vgs/cmd/$@
+	go build -v  -o bin/$@ github.com/kc1212/virtual-grid/cmd/$@
 
 clean:
 	rm -rf bin

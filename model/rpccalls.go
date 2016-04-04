@@ -5,7 +5,7 @@ import (
 	"net/rpc"
 )
 
-import "github.com/kc1212/vgs/common"
+import "github.com/kc1212/virtual-grid/common"
 
 // TODO a lot of repeated code here, need to be generalised
 

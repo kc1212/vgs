@@ -7,8 +7,8 @@ import (
 )
 
 import (
-	"github.com/kc1212/vgs/common"
-	"github.com/kc1212/vgs/discosrv"
+	"github.com/kc1212/virtual-grid/common"
+	"github.com/kc1212/virtual-grid/discosrv"
 )
 
 // GridSdr describes the properties of one grid scheduler

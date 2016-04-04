@@ -4,8 +4,8 @@ import (
 	"log"
 )
 
-import "github.com/kc1212/vgs/common"
-import "github.com/kc1212/vgs/discosrv"
+import "github.com/kc1212/virtual-grid/common"
+import "github.com/kc1212/virtual-grid/discosrv"
 
 type ResMan struct {
 	common.Node

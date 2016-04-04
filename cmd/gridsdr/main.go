@@ -5,7 +5,7 @@ import (
 	"net"
 )
 
-import "github.com/kc1212/vgs/model"
+import "github.com/kc1212/virtual-grid/model"
 
 func main() {
 	defaultAddr := net.JoinHostPort("localhost", "3000")
