@@ -2,6 +2,7 @@ package model
 
 import (
 	"log"
+	"sync"
 	"time"
 )
 
@@ -97,21 +98,36 @@ func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 }
 
 func (rm *ResMan) handleCompletionMsg() {
-	for {
-		select {
-		case jobID := <-rm.completedChan:
-			rest := common.TakeAllInt64Chan(rm.completedChan)
-			ids := append(rest, jobID) // TODO this really should be prepend
+	ids := make([]int64, 0)
+	mutex := sync.Mutex{}
 
-			// run rpcSyncCompletedJobs with one of the GSs
-			for k := range rm.gsNodes.GetAll() {
-				_, e := rpcSyncCompletedJobs(k, &ids)
-				if e == nil {
-					break
-				}
+	// update the ids array when something arrives in completedChan
+	go func() {
+		for {
+			for id := range rm.completedChan {
+				mutex.Lock()
+				ids = append(ids, id)
+				mutex.Unlock()
 			}
-		default: // sleep instead of timeout because we want to send completed messages in a batch
-			time.Sleep(100 * time.Millisecond)
 		}
+	}()
+
+	// send the ids to GS every 100ms
+	for {
+		time.Sleep(100 * time.Millisecond)
+		if len(ids) == 0 {
+			continue
+		}
+
+		mutex.Lock()
+		// NOTE: better to randomly choose a GS
+		for k := range rm.gsNodes.GetAll() {
+			_, e := rpcSyncCompletedJobs(k, &ids)
+			if e == nil {
+				break
+			}
+		}
+		ids = make([]int64, 0)
+		mutex.Unlock()
 	}
 }
