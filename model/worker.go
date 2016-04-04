@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-import "github.com/kc1212/vgs/common"
+import "github.com/kc1212/virtual-grid/common"
 
 // Worker is a compute nodes that does the actual processing
 type Worker struct {

@@ -1,6 +1,6 @@
 package model
 
-import "github.com/kc1212/vgs/common"
+import "github.com/kc1212/virtual-grid/common"
 
 type Job struct {
 	ID       int64 // must be unique
