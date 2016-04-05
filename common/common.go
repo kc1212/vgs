@@ -158,7 +158,7 @@ func RunRPC(s interface{}, addr string) {
 func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply interface{}) error {
 	e := remote.Call(fn, args, reply)
 	if e != nil {
-		log.Printf("Remote call %v on %v failed, %v\n", fn, args, e.Error())
+		log.Printf("Remote call %v failed, %v\n", fn, e.Error())
 	}
 	return e
 }

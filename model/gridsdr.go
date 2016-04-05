@@ -47,8 +47,8 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 	return GridSdr{
 		common.Node{id, addr, common.GSNode},
 		gsNodes, rmNodes, leader,
-		make(chan Job, 1000),
-		make(chan Job, 1000),
+		make(chan Job, 1000000),
+		make(chan Job, 1000000),
 		make(chan common.Task, 100),
 		&common.SyncedVal{V: false},
 		make(chan int, 100),
@@ -202,9 +202,9 @@ func (gs *GridSdr) obtainCritSection() {
 	successes := rpcGo(addrs, &args, rpcSendMsgToGS)
 	gs.reqClock = gs.clock.Geti64()
 
-	// wait until others has written to mutexRespChan or time out (2s)
+	// wait until others has written to mutexRespChan or time out (5s)
 	cnt := 0
-	timeout := time.After(2 * time.Second)
+	timeout := time.After(5 * time.Second)
 loop:
 	for {
 		if cnt >= successes {
@@ -229,9 +229,9 @@ loop:
 
 // releaseCritSection sets the mutexState to StateReleased and then runs all the queued requests.
 func (gs *GridSdr) releaseCritSection() {
-	log.Printf("starting release")
+	log.Print("starting release")
 	gs.mutexState.Set(common.StateReleased)
-	log.Printf("set released", len(gs.mutexReqChan))
+	log.Print("set released", len(gs.mutexReqChan))
 	for {
 		select {
 		case req := <-gs.mutexReqChan:
