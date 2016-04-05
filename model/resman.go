@@ -48,7 +48,7 @@ func (rm *ResMan) Run() {
 
 // AddJob RPC call
 func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
-	log.Printf("Jobs received %v\n", *jobs)
+	log.Printf("%v jobs received \n", len(*jobs))
 
 	// make a channel of jobs, and then schedule them
 	for _, j := range *jobs {

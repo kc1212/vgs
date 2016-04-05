@@ -29,13 +29,13 @@ func rpcSendMsgToGS(addr string, args *RPCArgs) (int, error) {
 // rpcAddJobsToGS is a remote call that calls `RecvJobs`.
 // NOTE: this function should only be executed when CS is obtained.
 func rpcSyncJobs(addr string, jobs *[]Job) (int, error) {
-	log.Printf("Syncing jobs %v with GS on %v\n", *jobs, addr)
+	log.Printf("Syncing %v jobs with GS on %v\n", len(*jobs), addr)
 	reply, e := common.DialAndCallNoFail(addr, "GridSdr.RecvJobs", jobs)
 	return reply, e
 }
 
 func rpcSyncScheduledJobs(addr string, jobs *[]Job) (int, error) {
-	log.Printf("Syncing scheduled jobs %v with GS %v\n", *jobs, addr)
+	log.Printf("Syncing %v scheduled jobs with GS on %v\n", len(*jobs), addr)
 	reply, e := common.DialAndCallNoFail(addr, "GridSdr.RecvScheduledJobs", jobs)
 	return reply, e
 }

@@ -326,7 +326,7 @@ func (gs *GridSdr) RecvMsg(args *RPCArgs, reply *int) error {
 // RecvJobs appends new jobs into the jobs queue.
 // NOTE: this function should not be called directly by the client, it requires CS.
 func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
-	log.Printf("new incoming jobs %v\n", *jobs)
+	log.Printf("%v new incoming jobs.\n", len(*jobs))
 	jobsToChan(*jobs, gs.incomingJobs)
 	*reply = 0
 	return nil
@@ -334,7 +334,7 @@ func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
 
 // NOTE: this function should not be called directly by the client, it requires CS.
 func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
-	log.Printf("adding scheduled jobs: %v\n", *jobs)
+	log.Printf("Adding %v scheduled jobs.\n", len(*jobs))
 	jobsToChan(*jobs, gs.scheduledJobs)
 	*reply = 0
 	return nil
@@ -355,7 +355,7 @@ func (gs *GridSdr) SyncCompletedJobs(js *[]int64, reply *int) error {
 			rpcRemoveCompletedJobs(k, js)
 
 			// TODO remove it from myself too
-			log.Printf("I'm removing jobs %v.\n", *js)
+			log.Printf("I'm removing %v jobs.\n", len(*js))
 		}
 		c <- 0
 		return 0, nil
@@ -367,7 +367,7 @@ func (gs *GridSdr) SyncCompletedJobs(js *[]int64, reply *int) error {
 
 // RemoveCompletedJobs is called by another GS to remove job(s) from the scheduledJobs
 func (gs *GridSdr) RemoveCompletedJobs(js *[]int, reply *int) error {
-	log.Printf("I'm removing jobs %v.\n", *js)
+	log.Printf("I'm removing %v jobs.\n", len(*js))
 	*reply = 0
 	return nil
 }
