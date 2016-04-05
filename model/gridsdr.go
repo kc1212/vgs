@@ -123,14 +123,10 @@ func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
 		reply, e := rpcAddJobsToRM(rmAddr, &jobs)
 
 		// add jobs to the submitted list for all GSs
-		for k := range gs.gsNodes.GetAll() {
-			rpcSyncScheduledJobs(k, &jobs)
-		}
+		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), &jobs, rpcSyncScheduledJobs)
 
 		// remove jobs from the incomingJobs list
-		for k := range gs.gsNodes.GetAll() {
-			rpcDropJobs(k, len(jobs))
-		}
+		rpcIntGo(common.SliceFromMap(gs.gsNodes.GetAll()), len(jobs), rpcDropJobs)
 
 		c <- 0
 		return reply, e
@@ -201,14 +197,9 @@ func (gs *GridSdr) obtainCritSection() {
 	gs.mutexState.Set(common.StateWanted)
 
 	gs.clock.Tick()
-	successes := 0
-	for k := range gs.gsNodes.GetAll() {
-		args := gs.rpcArgsForGS(common.MutexReq)
-		_, e := rpcSendMsgToGS(k, &args)
-		if e == nil {
-			successes++
-		}
-	}
+	args := gs.rpcArgsForGS(common.MutexReq)
+	addrs := common.SliceFromMap(gs.gsNodes.GetAll())
+	successes := rpcGo(addrs, &args, rpcSendMsgToGS)
 	gs.reqClock = gs.clock.Geti64()
 
 	// wait until others has written to mutexRespChan or time out (2s)
@@ -238,7 +229,9 @@ loop:
 
 // releaseCritSection sets the mutexState to StateReleased and then runs all the queued requests.
 func (gs *GridSdr) releaseCritSection() {
+	log.Printf("starting release")
 	gs.mutexState.Set(common.StateReleased)
+	log.Printf("set released", len(gs.mutexReqChan))
 	for {
 		select {
 		case req := <-gs.mutexReqChan:
@@ -262,11 +255,11 @@ func (gs *GridSdr) elect() {
 
 	gs.clock.Tick()
 	oks := 0
+	args := gs.rpcArgsForGS(common.ElectionMsg)
 	for k, v := range gs.gsNodes.GetAll() {
 		if v.ID < int64(gs.ID) {
 			continue // do nothing to lower ids
 		}
-		args := gs.rpcArgsForGS(common.ElectionMsg)
 		_, e := rpcSendMsgToGS(k, &args)
 		if e == nil {
 			oks++
@@ -278,10 +271,10 @@ func (gs *GridSdr) elect() {
 		gs.clock.Tick()
 		gs.leader = gs.Addr
 		log.Printf("I'm the leader (%v).\n", gs.leader)
-		for k, _ := range gs.gsNodes.GetAll() {
-			args := gs.rpcArgsForGS(common.CoordinateMsg)
-			rpcSendMsgToGS(k, &args) // NOTE: ok to fail the send, because nodes might be done
-		}
+
+		args := gs.rpcArgsForGS(common.CoordinateMsg)
+		addrs := common.SliceFromMap(gs.gsNodes.GetAll())
+		rpcGo(addrs, &args, rpcSendMsgToGS) // NOTE: ok to fail the send, because nodes might be done
 	}
 
 	// artificially make the election last longer so that multiple messages
@@ -351,12 +344,11 @@ func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 func (gs *GridSdr) SyncCompletedJobs(js *[]int64, reply *int) error {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
-		for k := range gs.gsNodes.GetAll() {
-			rpcRemoveCompletedJobs(k, js)
+		rpcInt64sGo(common.SliceFromMap(gs.gsNodes.GetAll()), js, rpcRemoveCompletedJobs)
 
-			// TODO remove it from myself too
-			log.Printf("I'm removing %v jobs.\n", len(*js))
-		}
+		// TODO remove it from myself too
+		log.Printf("I'm removing %v jobs.\n", len(*js))
+
 		c <- 0
 		return 0, nil
 	}
@@ -377,9 +369,8 @@ func (gs *GridSdr) AddJobsTask(jobs *[]Job, reply *int) error {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
 		// add jobs to the others
-		for k := range gs.gsNodes.GetAll() {
-			rpcSyncJobs(k, jobs) // ok to fail
-		}
+		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcSyncJobs)
+
 		// add jobs to myself
 		r := -1
 		e := gs.RecvJobs(jobs, &r)

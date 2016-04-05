@@ -2,6 +2,7 @@ package model
 
 import (
 	"log"
+	"sync"
 )
 
 import "github.com/kc1212/virtual-grid/common"
@@ -53,4 +54,105 @@ func rpcSyncCompletedJobs(addr string, jobs *[]int64) (int, error) {
 func rpcRemoveCompletedJobs(addr string, jobs *[]int64) (int, error) {
 	reply, e := common.DialAndCallNoFail(addr, "GridSdr.RemoveCompletedJobs", jobs)
 	return reply, e
+}
+
+// TODO horrible repeated code
+func rpcInt64sGo(addrs []string, args *[]int64,
+	rpcFn func(string, *[]int64) (int, error)) int {
+
+	wg := sync.WaitGroup{}
+	ch := make(chan int, len(addrs))
+	for _, addr := range addrs {
+		wg.Add(1)
+		go func(s string) {
+			defer wg.Done()
+			_, e := rpcFn(s, args)
+			if e == nil {
+				ch <- 0
+			}
+		}(addr)
+	}
+	wg.Wait()
+
+	close(ch)
+	res := 0
+	for range ch {
+		res++
+	}
+	return res
+}
+
+func rpcIntGo(addrs []string, args int,
+	rpcFn func(string, int) (int, error)) int {
+
+	wg := sync.WaitGroup{}
+	ch := make(chan int, len(addrs))
+	for _, addr := range addrs {
+		wg.Add(1)
+		go func(s string) {
+			defer wg.Done()
+			_, e := rpcFn(s, args)
+			if e == nil {
+				ch <- 0
+			}
+		}(addr)
+	}
+	wg.Wait()
+
+	close(ch)
+	res := 0
+	for range ch {
+		res++
+	}
+	return res
+}
+
+func rpcJobsGo(addrs []string, args *[]Job,
+	rpcFn func(string, *[]Job) (int, error)) int {
+
+	wg := sync.WaitGroup{}
+	ch := make(chan int, len(addrs))
+	for _, addr := range addrs {
+		wg.Add(1)
+		go func(s string) {
+			defer wg.Done()
+			_, e := rpcFn(s, args)
+			if e == nil {
+				ch <- 0
+			}
+		}(addr)
+	}
+	wg.Wait()
+
+	close(ch)
+	res := 0
+	for range ch {
+		res++
+	}
+	return res
+}
+
+func rpcGo(addrs []string, args *RPCArgs,
+	rpcFn func(string, *RPCArgs) (int, error)) int {
+
+	wg := sync.WaitGroup{}
+	ch := make(chan int, len(addrs))
+	for _, addr := range addrs {
+		wg.Add(1)
+		go func(s string) {
+			defer wg.Done()
+			_, e := rpcFn(s, args)
+			if e == nil {
+				ch <- 0
+			}
+		}(addr)
+	}
+	wg.Wait()
+
+	close(ch)
+	res := 0
+	for range ch {
+		res++
+	}
+	return res
 }
