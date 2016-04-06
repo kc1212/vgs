@@ -2,7 +2,6 @@ package common
 
 //go:generate stringer -type=MsgType
 //go:generate stringer -type=MutexState
-//go:generate stringer -type=JobStatus
 
 import (
 	"log"
@@ -45,15 +44,6 @@ const (
 	GSNode NodeType = iota
 	RMNode
 	DSNode
-)
-
-type JobStatus int
-
-const (
-	Waiting JobStatus = iota
-	Submitted
-	Running
-	Finished
 )
 
 type Task func() (interface{}, error)
@@ -168,9 +158,23 @@ func RunRPC(s interface{}, addr string) {
 func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply interface{}) error {
 	e := remote.Call(fn, args, reply)
 	if e != nil {
-		log.Printf("Remote call %v on %v failed, %v\n", fn, args, e.Error())
+		log.Printf("Remote call %v failed, %v\n", fn, e.Error())
 	}
 	return e
+}
+
+// TODO is there a way to make the reply generic?
+func DialAndCallNoFail(addr string, fn string, args interface{}) (int, error) {
+	// var reply interface{}
+	reply := -1
+	remote, e1 := rpc.DialHTTP("tcp", addr)
+	if e1 != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return reply, e1
+	}
+	defer remote.Close()
+	e2 := RemoteCallNoFail(remote, fn, args, &reply)
+	return reply, e2
 }
 
 func SliceFromMap(mymap map[string]IntClient) []string {
@@ -192,6 +196,21 @@ func EmptyIntChan(c <-chan int) {
 			return
 		}
 	}
+}
+
+// TakeAllInt64Chan returns a list with all the values in the buffered channel
+func TakeAllInt64Chan(c <-chan int64) []int64 {
+	res := make([]int64, 0)
+loop:
+	for {
+		select {
+		case v := <-c:
+			res = append(res, v)
+		default:
+			break loop
+		}
+	}
+	return res
 }
 
 func MinInt(a int, b int) int {

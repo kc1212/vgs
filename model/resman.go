@@ -2,6 +2,8 @@ package model
 
 import (
 	"log"
+	"sync"
+	"time"
 )
 
 import "github.com/kc1212/virtual-grid/common"
@@ -9,18 +11,24 @@ import "github.com/kc1212/virtual-grid/discosrv"
 
 type ResMan struct {
 	common.Node
-	workers      []Worker
-	gsNodes      *common.SyncedSet
-	jobsChan     chan Job
-	discosrvAddr string
+	n             int // number of workers
+	gsNodes       *common.SyncedSet
+	tasksChan     chan WorkerTask
+	completedChan chan int64
+	capReq        chan int
+	capResp       chan int
+	discosrvAddr  string
 }
 
 func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 	return ResMan{
 		common.Node{ID: id, Addr: addr, Type: common.RMNode},
-		make([]Worker, n),
+		n,
 		&common.SyncedSet{S: make(map[string]common.IntClient)},
-		make(chan Job, 1000),
+		make(chan WorkerTask, 1000),
+		make(chan int64),
+		make(chan int),
+		make(chan int),
 		dsAddr}
 }
 
@@ -34,18 +42,24 @@ func (rm *ResMan) Run() {
 
 	go discosrv.ImAlivePoll(rm.Addr, common.RMNode, rm.discosrvAddr)
 	go common.RunRPC(rm, rm.Addr)
-	rm.schedule()
+	go runWorkers(rm.n, rm.tasksChan, rm.capReq, rm.capResp, rm.completedChan)
+	rm.handleCompletionMsg()
 }
 
 // AddJob RPC call
 func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
-	log.Printf("Jobs received %v\n", *jobs)
+	log.Printf("%v jobs received \n", len(*jobs))
 
 	// make a channel of jobs, and then schedule them
 	for _, j := range *jobs {
-		rm.jobsChan <- j
+		// in theory the task can be arbitrary, here we just run Sleep
+		task := func() (interface{}, error) {
+			time.Sleep(time.Duration(j.Duration) * time.Second)
+			return 0, nil
+		}
+		rm.tasksChan <- WorkerTask{task, j.ID}
 	}
-	*reply = 1
+	*reply = 0
 	return nil
 }
 
@@ -66,6 +80,12 @@ func (rm *ResMan) RecvMsg(args *RPCArgs, reply *int) error {
 	return nil
 }
 
+func (rm *ResMan) computeCapacity() int {
+	rm.capReq <- 0
+	cap := <-rm.capResp
+	return cap
+}
+
 func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 	// NOTE: does RM doesn't use a clock, hence the zero
 	arg := RPCArgs{rm.ID, rm.Addr, common.RMUpMsg, 0}
@@ -77,38 +97,37 @@ func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 	}
 }
 
-// computeCapacity computes the collective remaining capacity of the worker nodes.
-func (rm *ResMan) computeCapacity() int {
-	cnt := 0
-	for _, w := range rm.workers {
-		if !w.isRunning() {
-			cnt++
-		}
-	}
-	return cnt
-}
+func (rm *ResMan) handleCompletionMsg() {
+	ids := make([]int64, 0)
+	mutex := sync.Mutex{}
 
-// greedy scheduler
-func (rm *ResMan) schedule() {
-	for {
-		select {
-		case j := <-rm.jobsChan:
-			i := rm.nextFreeNode()
-			if i == -1 {
-				log.Panic("Couldn't find free node")
+	// update the ids array when something arrives in completedChan
+	go func() {
+		for {
+			for id := range rm.completedChan {
+				mutex.Lock()
+				ids = append(ids, id)
+				mutex.Unlock()
 			}
-			rm.workers[i].startJob(j)
 		}
-	}
-}
+	}()
 
-func (rm *ResMan) nextFreeNode() int {
-	// TODO looping over all workers is inefficient
-	// because the low idx workers are always assigned first
-	for i := range rm.workers {
-		if !rm.workers[i].isRunning() {
-			return i
+	// send the ids to GS every 100ms
+	for {
+		time.Sleep(100 * time.Millisecond)
+		if len(ids) == 0 {
+			continue
 		}
+
+		mutex.Lock()
+		// NOTE: better to randomly choose a GS
+		for k := range rm.gsNodes.GetAll() {
+			_, e := rpcSyncCompletedJobs(k, &ids)
+			if e == nil {
+				break
+			}
+		}
+		ids = make([]int64, 0)
+		mutex.Unlock()
 	}
-	return -1
 }

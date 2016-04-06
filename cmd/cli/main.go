@@ -38,7 +38,8 @@ func cli() {
 	reply := -1
 	remote, e := rpc.DialHTTP("tcp", *addr)
 	if e != nil {
-		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		log.Printf("Node %v is not online, make sure to use the correct address?\n", *addr)
+		return
 	}
 	if e := remote.Call("GridSdr.AddJobsTask", &jobs, &reply); e != nil {
 		log.Printf("Remote call GridSdr.RecvJobs failed on %v, %v\n", addr, e.Error())
