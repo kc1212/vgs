@@ -24,10 +24,10 @@ func work(workerID int64, resultChan chan<- WorkerDone) chan WorkerTask {
 		for {
 			select {
 			case mytask := <-taskChan:
-				log.Printf("Worker %v started job %v.\n", workerID, mytask.jobID)
+				// log.Printf("Worker %v started job %v.\n", workerID, mytask.jobID)
 				mytask.task()
 				resultChan <- WorkerDone{mytask.jobID, workerID}
-				log.Printf("Worker %v finished Job %v.\n", workerID, mytask.jobID)
+				// log.Printf("Worker %v finished Job %v.\n", workerID, mytask.jobID)
 			}
 		}
 	}()

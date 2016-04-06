@@ -63,8 +63,7 @@ func (ds *DiscoSrv) runRemoveDead() {
 
 		threshold := int64(20)
 		t := time.Now().Unix()
-		log.Println("GS: ", *ds.gsSet)
-		log.Println("RM: ", *ds.rmSet)
+		log.Printf("%v GS's, %v RM's\n", len(ds.gsSet.GetAll()), len(ds.rmSet.GetAll()))
 
 		// TODO repeated code, loop over the two sets
 		ds.gsSet.Lock()

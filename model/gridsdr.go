@@ -229,9 +229,7 @@ loop:
 
 // releaseCritSection sets the mutexState to StateReleased and then runs all the queued requests.
 func (gs *GridSdr) releaseCritSection() {
-	log.Print("starting release")
 	gs.mutexState.Set(common.StateReleased)
-	log.Print("set released", len(gs.mutexReqChan))
 	for {
 		select {
 		case req := <-gs.mutexReqChan:

@@ -8,7 +8,7 @@ import (
 import "github.com/kc1212/virtual-grid/common"
 
 func rpcSendMsgToRM(addr string, args *RPCArgs) (int, error) {
-	log.Printf("Sending message %v to %v\n", *args, addr)
+	// log.Printf("Sending message %v to %v\n", *args, addr)
 	reply, e := common.DialAndCallNoFail(addr, "ResMan.RecvMsg", args)
 	return reply, e
 }

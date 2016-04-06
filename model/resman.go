@@ -120,7 +120,9 @@ func (rm *ResMan) handleCompletionMsg() {
 		}
 
 		mutex.Lock()
-		// NOTE: better to randomly choose a GS
+		log.Printf("Completed %v jobs.\n", len(ids))
+
+		// NOTE: range over map is random
 		for k := range rm.gsNodes.GetAll() {
 			_, e := rpcSyncCompletedJobs(k, &ids)
 			if e == nil {
