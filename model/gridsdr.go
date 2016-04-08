@@ -18,10 +18,10 @@ type GridSdr struct {
 	rmNodes             *common.SyncedSet // the resource managers
 	leader              string            // the lead grid scheduler
 	incomingJobs        chan Job          // when user adds a job, it comes here
-	scheduledJobAddChan chan Job          // when GS schedules a job, it gets stored here
-	scheduledJobRmChan  chan int64        // when GS schedules a job, it gets stored here
-	scheduledJobs       map[int64]Job
-	tasks               chan common.Task // these tasks require critical section (CS)
+	scheduledJobAddChan chan Job          // channel for new scheduled jobs
+	scheduledJobRmChan  chan int64        // channel for removing jobs that are completed
+	scheduledJobs       map[int64]Job     // when GS schedules a job, it gets stored here via the two channels
+	tasks               chan common.Task  // these tasks require critical section (CS)
 	inElection          *common.SyncedVal
 	mutexRespChan       chan int
 	mutexReqChan        chan common.Task
@@ -103,7 +103,6 @@ func (gs *GridSdr) updateScheduledJobs() {
 			if !gs.imLeader() || len(gs.scheduledJobs) == 0 {
 				break
 			}
-			log.Println("checking RMs...")
 			rms := gs.getAliveRMs()
 			for _, v := range gs.scheduledJobs {
 				if _, ok := rms[v.ResMan]; !ok {
