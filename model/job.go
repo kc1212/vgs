@@ -28,7 +28,7 @@ func dropJobs(n int, c <-chan Job) {
 
 // takeJobs will take at most n jobs from channel `c`
 func takeJobs(n int, c <-chan Job) []Job {
-	jobs := *new([]Job)
+	jobs := make([]Job, 0)
 loop:
 	for i := 0; i < n; i++ {
 		select {
@@ -41,8 +41,24 @@ loop:
 	return jobs
 }
 
-func jobsToChan(jobs []Job, c chan<- Job) {
+func jobsToChan(jobs []Job, c *chan<- Job) {
 	for _, j := range jobs {
-		c <- j
+		*c <- j
 	}
+}
+
+// chanToJobs attempts to copy all the jobs from a buffered channel
+// without modifying that channel
+// TODO NOT SURE IF THIS IS THE RIGHT WAY TO THIS
+func chanToJobs(c *chan Job, cap int) []Job {
+	jobs := make([]Job, 0)
+	c2 := *c
+	*c = make(chan Job, cap)
+	close(c2)
+
+	for job := range c2 {
+		*c <- job
+		jobs = append(jobs, job)
+	}
+	return jobs
 }

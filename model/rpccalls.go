@@ -42,6 +42,7 @@ func rpcSyncScheduledJobs(addr string, jobs *[]Job) (int, error) {
 }
 
 func rpcDropJobs(addr string, n int) (int, error) {
+	log.Printf("Dropping %v jobs on %v\n", n, addr)
 	reply, e := common.DialAndCallNoFail(addr, "GridSdr.DropJobs", &n)
 	return reply, e
 }
