@@ -90,11 +90,6 @@ func (gs *GridSdr) imLeader() bool {
 
 func (gs *GridSdr) updateScheduledJobs() {
 	for {
-		if !gs.imLeader() {
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-
 		timeout := time.After(time.Second)
 		select {
 		case job := <-gs.scheduledJobAddChan:
@@ -104,7 +99,8 @@ func (gs *GridSdr) updateScheduledJobs() {
 		case <-timeout:
 			// every `timeout` check the RMs and see whether they're up
 			// then re-schedule the jobs if the responsible RM is down
-			if len(gs.scheduledJobs) == 0 {
+			// only do this for leader
+			if !gs.imLeader() || len(gs.scheduledJobs) == 0 {
 				break
 			}
 			log.Println("checking RMs...")
