@@ -20,7 +20,7 @@ type GridSdr struct {
 	incomingJobs        chan Job          // when user adds a job, it comes here
 	scheduledJobAddChan chan Job          // when GS schedules a job, it gets stored here
 	scheduledJobRmChan  chan int64        // when GS schedules a job, it gets stored here
-	scheduledJobs       map[int64]bool
+	scheduledJobs       map[int64]Job
 	tasks               chan common.Task // these tasks require critical section (CS)
 	inElection          *common.SyncedVal
 	mutexRespChan       chan int
@@ -54,7 +54,7 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 		make(chan Job, 1000000),
 		make(chan Job, 1000000),
 		make(chan int64),
-		make(map[int64]bool),
+		make(map[int64]Job),
 		make(chan common.Task, 100),
 		&common.SyncedVal{V: false},
 		make(chan int, 100),
@@ -90,13 +90,45 @@ func (gs *GridSdr) imLeader() bool {
 
 func (gs *GridSdr) updateScheduledJobs() {
 	for {
+		if !gs.imLeader() {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		timeout := time.After(time.Second)
 		select {
 		case job := <-gs.scheduledJobAddChan:
-			gs.scheduledJobs[job.ID] = true
+			gs.scheduledJobs[job.ID] = job
 		case id := <-gs.scheduledJobRmChan:
 			delete(gs.scheduledJobs, id)
+		case <-timeout:
+			// every `timeout` check the RMs and see whether they're up
+			// then re-schedule the jobs if the responsible RM is down
+			if len(gs.scheduledJobs) == 0 {
+				break
+			}
+			log.Println("checking RMs...")
+			rms := gs.getAliveRMs()
+			for _, v := range gs.scheduledJobs {
+				if _, ok := rms[v.ResMan]; !ok {
+					gs.incomingJobs <- v
+					delete(gs.scheduledJobs, v.ID)
+				}
+			}
 		}
 	}
+}
+
+func (gs *GridSdr) getAliveRMs() map[string]common.IntClient {
+	res := make(map[string]common.IntClient)
+	for k, v := range gs.rmNodes.GetAll() {
+		remote, e := rpc.DialHTTP("tcp", k)
+		if e == nil {
+			res[k] = v
+			remote.Close()
+		}
+	}
+	return res
 }
 
 func (gs *GridSdr) scheduleJobs() {
@@ -125,6 +157,10 @@ func (gs *GridSdr) scheduleJobs() {
 		case job := <-gs.incomingJobs:
 			rest := takeJobs(cap-1, gs.incomingJobs)
 			jobs := append(rest, job) // TODO this really should be prepend
+			for i := range jobs {
+				jobs[i].ResMan = addr
+			}
+
 			jobsToChan(jobs, gs.scheduledJobAddChan)
 			gs.runJobsTask(jobs, addr) // this function blocks util the task finishes executing
 		case <-time.After(100 * time.Millisecond):
@@ -134,6 +170,7 @@ func (gs *GridSdr) scheduleJobs() {
 }
 
 // runJobsTask pushes to tasks channel, it blocks until the task is completed
+// TODO: rmAddr is contained in jobs already, we can possibly reduce redundancy
 func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
@@ -363,6 +400,8 @@ func (gs *GridSdr) SyncCompletedJobs(jobs *[]int64, reply *int) error {
 		rpcInt64sGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcRemoveCompletedJobs)
 
 		// remove it from myself too
+		// TODO this is repeated code, more elegant if RPC call can be done on myself too
+		log.Printf("I'm removing %v jobs.\n", len(*jobs))
 		for _, job := range *jobs {
 			gs.scheduledJobRmChan <- job
 		}

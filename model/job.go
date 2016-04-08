@@ -3,11 +3,7 @@ package model
 type Job struct {
 	ID       int64 // must be unique
 	Duration int64
-	History  []string // possibly improve the type?
-}
-
-func (j *Job) appendHistory(x string) {
-	j.History = append(j.History, x)
+	ResMan   string // possibly improve the type?
 }
 
 func filterJobs(s []Job, fn func(Job) bool) []Job {
