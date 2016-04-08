@@ -14,19 +14,21 @@ import (
 // GridSdr describes the properties of one grid scheduler
 type GridSdr struct {
 	common.Node
-	gsNodes       *common.SyncedSet // other grid schedulers, not including myself
-	rmNodes       *common.SyncedSet // the resource managers
-	leader        string            // the lead grid scheduler
-	incomingJobs  chan Job          // when user adds a job, it comes here
-	scheduledJobs chan Job          // when GS schedules a job, it gets stored here
-	tasks         chan common.Task  // these tasks require critical section (CS)
-	inElection    *common.SyncedVal
-	mutexRespChan chan int
-	mutexReqChan  chan common.Task
-	mutexState    *common.SyncedVal
-	clock         *common.SyncedVal
-	reqClock      int64
-	discosrvAddr  string
+	gsNodes             *common.SyncedSet // other grid schedulers, not including myself
+	rmNodes             *common.SyncedSet // the resource managers
+	leader              string            // the lead grid scheduler
+	incomingJobs        chan Job          // when user adds a job, it comes here
+	scheduledJobAddChan chan Job          // when GS schedules a job, it gets stored here
+	scheduledJobRmChan  chan int64        // when GS schedules a job, it gets stored here
+	scheduledJobs       map[int64]bool
+	tasks               chan common.Task // these tasks require critical section (CS)
+	inElection          *common.SyncedVal
+	mutexRespChan       chan int
+	mutexReqChan        chan common.Task
+	mutexState          *common.SyncedVal
+	clock               *common.SyncedVal
+	reqClock            int64
+	discosrvAddr        string
 }
 
 // RPCArgs is the arguments for RPC calls between grid schedulers and/or resource maanagers
@@ -46,9 +48,13 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 
 	return GridSdr{
 		common.Node{id, addr, common.GSNode},
-		gsNodes, rmNodes, leader,
+		gsNodes,
+		rmNodes,
+		leader,
 		make(chan Job, 1000000),
 		make(chan Job, 1000000),
+		make(chan int64),
+		make(map[int64]bool),
 		make(chan common.Task, 100),
 		&common.SyncedVal{V: false},
 		make(chan int, 100),
@@ -73,12 +79,24 @@ func (gs *GridSdr) Run() {
 	go common.RunRPC(gs, gs.Addr)
 	go gs.pollLeader()
 	go gs.runTasks()
+	go gs.updateScheduledJobs()
 
 	gs.scheduleJobs()
 }
 
 func (gs *GridSdr) imLeader() bool {
 	return gs.leader == gs.Addr
+}
+
+func (gs *GridSdr) updateScheduledJobs() {
+	for {
+		select {
+		case job := <-gs.scheduledJobAddChan:
+			gs.scheduledJobs[job.ID] = true
+		case id := <-gs.scheduledJobRmChan:
+			delete(gs.scheduledJobs, id)
+		}
+	}
 }
 
 func (gs *GridSdr) scheduleJobs() {
@@ -107,7 +125,7 @@ func (gs *GridSdr) scheduleJobs() {
 		case job := <-gs.incomingJobs:
 			rest := takeJobs(cap-1, gs.incomingJobs)
 			jobs := append(rest, job) // TODO this really should be prepend
-			jobsToChan(jobs, gs.scheduledJobs)
+			jobsToChan(jobs, gs.scheduledJobAddChan)
 			gs.runJobsTask(jobs, addr) // this function blocks util the task finishes executing
 		case <-time.After(100 * time.Millisecond):
 			break
@@ -326,7 +344,7 @@ func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
 // NOTE: this function should not be called directly by the client, it requires CS.
 func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
 	log.Printf("Adding %v scheduled jobs.\n", len(*jobs))
-	jobsToChan(*jobs, gs.scheduledJobs)
+	jobsToChan(*jobs, gs.scheduledJobAddChan)
 	*reply = 0
 	return nil
 }
@@ -339,13 +357,15 @@ func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 
 // SyncCompletedJobs is called by the RM when job(s) are completed.
 // We acquire a critical section and propogate the change to everybody.
-func (gs *GridSdr) SyncCompletedJobs(js *[]int64, reply *int) error {
+func (gs *GridSdr) SyncCompletedJobs(jobs *[]int64, reply *int) error {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
-		rpcInt64sGo(common.SliceFromMap(gs.gsNodes.GetAll()), js, rpcRemoveCompletedJobs)
+		rpcInt64sGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcRemoveCompletedJobs)
 
-		// TODO remove it from myself too
-		log.Printf("I'm removing %v jobs.\n", len(*js))
+		// remove it from myself too
+		for _, job := range *jobs {
+			gs.scheduledJobRmChan <- job
+		}
 
 		c <- 0
 		return 0, nil
@@ -355,9 +375,12 @@ func (gs *GridSdr) SyncCompletedJobs(js *[]int64, reply *int) error {
 	return nil
 }
 
-// RemoveCompletedJobs is called by another GS to remove job(s) from the scheduledJobs
-func (gs *GridSdr) RemoveCompletedJobs(js *[]int, reply *int) error {
-	log.Printf("I'm removing %v jobs.\n", len(*js))
+// RemoveCompletedJobs is called by another GS to remove job(s) from the scheduledJobAddChan
+func (gs *GridSdr) RemoveCompletedJobs(jobs *[]int64, reply *int) error {
+	log.Printf("I'm removing %v jobs.\n", len(*jobs))
+	for _, job := range *jobs {
+		gs.scheduledJobRmChan <- job
+	}
 	*reply = 0
 	return nil
 }
