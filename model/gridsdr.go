@@ -106,11 +106,14 @@ func (gs *GridSdr) updateScheduledJobs() {
 				break
 			}
 			rms := gs.getAliveRMs()
+			toBeRescheduled := make([]Job, 0)
 			for _, v := range gs.scheduledJobs {
 				if _, ok := rms[v.ResMan]; !ok {
-					gs.incomingJobAddChan <- v
-					delete(gs.scheduledJobs, v.ID)
+					toBeRescheduled = append(toBeRescheduled, v)
 				}
+			}
+			if len(toBeRescheduled) > 0 {
+				gs.rescheduleJobs(toBeRescheduled) // blocks
 			}
 		case job := <-gs.scheduledJobAddChan:
 			gs.scheduledJobs[job.ID] = job
@@ -143,7 +146,6 @@ func (gs *GridSdr) scheduleJobs() {
 		timeout := time.After(100 * time.Millisecond)
 		select {
 		case <-timeout:
-			log.Println("here!!!1111")
 			// try again later if I'm not leader
 			if !gs.imLeader() {
 				break
@@ -168,16 +170,12 @@ func (gs *GridSdr) scheduleJobs() {
 			gs.runJobsTask(jobs, addr) // this function blocks util the task finishes executing
 
 		case job := <-gs.incomingJobAddChan:
-			log.Println("here!!!2222")
 			// take all the jobs in the channel and put them in the slice
 			rest := takeJobs(1000000, gs.incomingJobAddChan)
 			gs.incomingJobs = append(gs.incomingJobs, job)
 			gs.incomingJobs = append(gs.incomingJobs, rest...)
-			log.Println("newJob!!!", gs.incomingJobs)
 
 		case n := <-gs.incomingJobRmChan:
-			log.Println("here!!!3333")
-			log.Println(n, gs.incomingJobs)
 			gs.incomingJobs = gs.incomingJobs[n:]
 		}
 	}
@@ -205,6 +203,33 @@ func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
 
 		c <- 0
 		return reply, e
+	}
+	<-c
+}
+
+// runs in the scheduleJobs select
+func (gs *GridSdr) rescheduleJobs(jobs []Job) {
+	c := make(chan int)
+	gs.tasks <- func() (interface{}, error) {
+		// remove it from scheduled jobs for myself
+		ids := make([]int64, len(jobs))
+		for i, job := range jobs {
+			delete(gs.scheduledJobs, job.ID)
+			ids[i] = job.ID
+		}
+		// for others
+		rpcInt64sGo(common.SliceFromMap(gs.gsNodes.GetAll()), &ids, rpcRemoveCompletedJobs)
+
+		// add back to incoming list for myself
+		for _, job := range jobs {
+			job.ResMan = ""
+			gs.incomingJobAddChan <- job
+		}
+		// for others
+		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), &jobs, rpcSyncJobs)
+
+		c <- 0
+		return 0, nil
 	}
 	<-c
 }
