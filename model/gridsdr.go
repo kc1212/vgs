@@ -96,7 +96,7 @@ func (gs *GridSdr) imLeader() bool {
 
 func (gs *GridSdr) updateScheduledJobs() {
 	for {
-		timeout := time.After(time.Second)
+		timeout := time.After(100 * time.Millisecond)
 		select {
 		case <-timeout:
 			// every `timeout` check the RMs and see whether they're up
@@ -143,9 +143,9 @@ func (gs *GridSdr) scheduleJobs() {
 		timeout := time.After(100 * time.Millisecond)
 		select {
 		case <-timeout:
+			log.Println("here!!!1111")
 			// try again later if I'm not leader
 			if !gs.imLeader() {
-				time.Sleep(time.Second)
 				break
 			}
 
@@ -168,6 +168,7 @@ func (gs *GridSdr) scheduleJobs() {
 			gs.runJobsTask(jobs, addr) // this function blocks util the task finishes executing
 
 		case job := <-gs.incomingJobAddChan:
+			log.Println("here!!!2222")
 			// take all the jobs in the channel and put them in the slice
 			rest := takeJobs(1000000, gs.incomingJobAddChan)
 			gs.incomingJobs = append(gs.incomingJobs, job)
@@ -175,6 +176,7 @@ func (gs *GridSdr) scheduleJobs() {
 			log.Println("newJob!!!", gs.incomingJobs)
 
 		case n := <-gs.incomingJobRmChan:
+			log.Println("here!!!3333")
 			log.Println(n, gs.incomingJobs)
 			gs.incomingJobs = gs.incomingJobs[n:]
 		}
@@ -197,7 +199,8 @@ func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
 		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), &jobs, rpcSyncScheduledJobs)
 
 		// remove jobs from the incomingJobs list
-		gs.incomingJobRmChan <- len(jobs) // for myself
+		// gs.incomingJobRmChan <- len(jobs) // for myself
+		gs.incomingJobs = gs.incomingJobs[len(jobs):] // NOTE: don't use channel in its own select statement!
 		rpcIntGo(common.SliceFromMap(gs.gsNodes.GetAll()), len(jobs), rpcDropJobs)
 
 		c <- 0
@@ -424,14 +427,15 @@ func (gs *GridSdr) SyncCompletedJobs(jobs *[]int64, reply *int) error {
 	gs.tasks <- func() (interface{}, error) {
 		// remove it from myself too
 		// TODO this is repeated code, more elegant if RPC call can be done on myself too
-		r := -1
-		gs.RemoveCompletedJobs(jobs, &r)
+		for _, job := range *jobs {
+			delete(gs.scheduledJobs, job)
+		}
 
 		// remove it from everybody else
 		rpcInt64sGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcRemoveCompletedJobs)
 
 		c <- 0
-		return r, nil
+		return 0, nil
 	}
 	<-c
 	*reply = 0
