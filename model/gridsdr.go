@@ -628,17 +628,18 @@ func (gs *GridSdr) runTasks() {
 		if len(gs.tasks) > 0 {
 			// acquire CS, run the tasks, run for 1ms at most, then release CS
 			gs.obtainCritSection()
-			timeout := time.After(time.Millisecond)
+			timeout := time.After(100 * time.Millisecond)
 		inner_loop:
 			for {
 				select {
+				case <-timeout:
+					// maintain critical section for at most `timeout` seconds
+					break inner_loop
 				case task := <-gs.tasks:
 					_, e := task()
 					if e != nil {
 						log.Panic("task failed with", e)
 					}
-				case <-timeout:
-					break inner_loop
 				default:
 					break inner_loop
 				}
