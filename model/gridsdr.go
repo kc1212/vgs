@@ -83,6 +83,7 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 
 // Run is the main function for GridSdr, it starts all its services, do not run it more than once.
 func (gs *GridSdr) Run() {
+	// populate my list of GSs and RMs
 	reply, e := discosrv.ImAliveProbe(gs.Addr, gs.Type, gs.discosrvAddr)
 	if e != nil {
 		log.Panicf("Discosrv on %v not online\n", gs.discosrvAddr)
@@ -90,6 +91,9 @@ func (gs *GridSdr) Run() {
 	gs.notifyAndPopulateGSs(reply.GSs)
 	gs.notifyAndPopulateRMs(reply.RMs)
 
+	// update my own state to the latest one available
+
+	// start all the services
 	go discosrv.ImAlivePoll(gs.Addr, gs.Type, gs.discosrvAddr)
 	go common.RunRPC(gs, gs.Addr)
 	go gs.pollLeader()
@@ -277,24 +281,42 @@ func (gs *GridSdr) getRMCapacities() map[string]int64 {
 	return capacities
 }
 
+// func (gs *GridSdr) getStates() []GridSdrState {
+// 	res := make([]GridSdrState, 0)
+// 	for _, addr := range gs.gsNodes.GetAll() {
+// 	}
+// }
+
 func (gs *GridSdr) notifyAndPopulateGSs(nodes []string) {
 	args := gs.rpcArgsForGS(common.GSUpMsg)
+	wg := sync.WaitGroup{}
 	for _, node := range nodes {
-		id, e := rpcSendMsgToGS(node, &args)
-		if e == nil {
-			gs.gsNodes.SetInt(node, int64(id))
-		}
+		wg.Add(1)
+		go func(addr string) {
+			defer wg.Done()
+			id, e := rpcSendMsgToGS(addr, &args)
+			if e == nil {
+				gs.gsNodes.SetInt(addr, int64(id))
+			}
+		}(node)
 	}
+	wg.Wait()
 }
 
 func (gs *GridSdr) notifyAndPopulateRMs(nodes []string) {
 	args := gs.rpcArgsForGS(common.RMUpMsg)
+	wg := sync.WaitGroup{}
 	for _, node := range nodes {
-		id, e := rpcSendMsgToRM(node, &args)
-		if e == nil {
-			gs.rmNodes.SetInt(node, int64(id))
-		}
+		wg.Add(1)
+		go func(addr string) {
+			defer wg.Done()
+			id, e := rpcSendMsgToRM(addr, &args)
+			if e == nil {
+				gs.rmNodes.SetInt(addr, int64(id))
+			}
+		}(node)
 	}
+	wg.Wait()
 }
 
 // obtainCritSection implements most of the Ricart-Agrawala algorithm, it sends the critical section request and then wait for responses until some timeout.

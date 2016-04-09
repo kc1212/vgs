@@ -89,12 +89,18 @@ func (rm *ResMan) computeCapacity() int {
 func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 	// NOTE: does RM doesn't use a clock, hence the zero
 	arg := RPCArgs{rm.ID, rm.Addr, common.RMUpMsg, 0}
+	wg := sync.WaitGroup{}
 	for _, node := range nodes {
-		id, e := rpcSendMsgToGS(node, &arg)
-		if e == nil {
-			rm.gsNodes.SetInt(node, int64(id))
-		}
+		wg.Add(1)
+		go func(addr string) {
+			defer wg.Done()
+			id, e := rpcSendMsgToGS(addr, &arg)
+			if e == nil {
+				rm.gsNodes.SetInt(addr, int64(id))
+			}
+		}(node)
 	}
+	wg.Wait()
 }
 
 func (rm *ResMan) handleCompletionMsg() {
