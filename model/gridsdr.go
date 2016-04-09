@@ -92,6 +92,8 @@ func (gs *GridSdr) Run() {
 	gs.notifyAndPopulateRMs(reply.RMs)
 
 	// update my own state to the latest one available
+	states := gs.getStates()
+	gs.updateStateLatest(states)
 
 	// start all the services
 	go discosrv.ImAlivePoll(gs.Addr, gs.Type, gs.discosrvAddr)
@@ -131,8 +133,8 @@ func (gs *GridSdr) updateScheduledJobs() {
 			delete(gs.scheduledJobs, id)
 
 		case c := <-gs.scheduledJobReqChan:
-			for _, v := range gs.scheduledJobs {
-				c <- v
+			for _, j := range gs.scheduledJobs {
+				c <- j
 			}
 			close(c)
 		}
@@ -281,11 +283,29 @@ func (gs *GridSdr) getRMCapacities() map[string]int64 {
 	return capacities
 }
 
-// func (gs *GridSdr) getStates() []GridSdrState {
-// 	res := make([]GridSdrState, 0)
-// 	for _, addr := range gs.gsNodes.GetAll() {
-// 	}
-// }
+func (gs *GridSdr) getStates() []GridSdrState {
+	res := make([]GridSdrState, 0)
+	nodes := gs.gsNodes.GetAll()
+	resChan := make(chan GridSdrState, len(nodes))
+	wg := sync.WaitGroup{}
+	for node := range nodes {
+		wg.Add(1)
+		go func(addr string) {
+			defer wg.Done()
+			s, e := rpcGetState(addr, 0)
+			if e == nil {
+				resChan <- s
+			}
+		}(node)
+	}
+	wg.Wait()
+
+	close(resChan)
+	for r := range resChan {
+		res = append(res, r)
+	}
+	return res
+}
 
 func (gs *GridSdr) notifyAndPopulateGSs(nodes []string) {
 	args := gs.rpcArgsForGS(common.GSUpMsg)
@@ -536,43 +556,48 @@ func (gs *GridSdr) AddJobsViaUser(jobs *[]Job, reply *int) error {
 }
 
 // TODO some repeated code in this function
-func (gs *GridSdr) SyncState(x *int, state *GridSdrState) {
+func (gs *GridSdr) GetState(x *int, state *GridSdrState) error {
 	// doesn't matter what x is
 
 	wg := sync.WaitGroup{}
+	state.Clock = gs.clock.Geti64()
 
 	// send request to the incoming jobs select loop and retrieve the result
 	incomingChan := make(chan Job)
-	incomingJobs := make([]Job, 0)
 	gs.incomingJobReqChan <- incomingChan
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
 		defer wg.Done()
+		jobs := make([]Job, 0)
 		for job := range incomingChan {
-			incomingJobs = append(incomingJobs, job)
+			jobs = append(jobs, job)
 		}
+		state.IncomingJobs = jobs
 	}()
 
 	scheduledChan := make(chan Job)
-	scheduledJobs := make([]Job, 0)
 	gs.scheduledJobReqChan <- scheduledChan
+	wg.Add(1)
 	go func() {
-		wg.Add(1)
+		jobs := make([]Job, 0)
 		defer wg.Done()
 		for job := range scheduledChan {
-			scheduledJobs = append(scheduledJobs, job)
+			jobs = append(jobs, job)
 		}
+		state.ScheduledJobs = jobs
 	}()
 
 	wg.Wait()
 
-	state.Clock = gs.clock.Geti64()
-	state.IncomingJobs = incomingJobs
-	state.ScheduledJobs = scheduledJobs
+	return nil
 }
 
 // updateStateLatest finds the state with the latest Lamport clock and then copies that state to myself
 func (gs *GridSdr) updateStateLatest(states []GridSdrState) {
+	if len(states) == 0 {
+		return
+	}
+
 	latestIdx := 0
 	latestClock := int64(0)
 	for i := range states {

@@ -2,6 +2,7 @@ package model
 
 import (
 	"log"
+	"net/rpc"
 	"sync"
 )
 
@@ -55,6 +56,20 @@ func rpcSyncCompletedJobs(addr string, jobs *[]int64) (int, error) {
 func rpcRemoveCompletedJobs(addr string, jobs *[]int64) (int, error) {
 	reply, e := common.DialAndCallNoFail(addr, "GridSdr.RemoveCompletedJobs", jobs)
 	return reply, e
+}
+
+// TODO can't use the generic common.DialAndCallNoFail because return type is complex, fix it
+func rpcGetState(addr string, x int) (GridSdrState, error) {
+	reply := GridSdrState{}
+	remote, e1 := rpc.DialHTTP("tcp", addr)
+	if e1 != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return reply, e1
+	}
+	defer remote.Close()
+	e2 := common.RemoteCallNoFail(remote, "GridSdr.GetState", &x, &reply)
+	log.Printf("Found state %v on %v\n", reply, addr)
+	return reply, e2
 }
 
 // TODO horrible repeated code
