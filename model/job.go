@@ -16,16 +16,6 @@ func filterJobs(s []Job, fn func(Job) bool) []Job {
 	return p
 }
 
-func dropJobs(n int, c <-chan Job) {
-	for i := 0; i < n; i++ {
-		select {
-		case <-c:
-		default:
-			return
-		}
-	}
-}
-
 // takeJobs will take at most n jobs from channel `c`
 func takeJobs(n int, c <-chan Job) []Job {
 	jobs := make([]Job, 0)
@@ -39,12 +29,6 @@ loop:
 		}
 	}
 	return jobs
-}
-
-func jobsToChan(jobs []Job, c *chan<- Job) {
-	for _, j := range jobs {
-		*c <- j
-	}
 }
 
 // chanToJobs attempts to copy all the jobs from a buffered channel

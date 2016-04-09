@@ -19,6 +19,7 @@ type GridSdr struct {
 	leader              string            // the lead grid scheduler
 	incomingJobAddChan  chan Job          // when user adds a job, it comes here
 	incomingJobRmChan   chan int
+	incomingJobReqChan  chan chan Job
 	incomingJobs        []Job
 	scheduledJobAddChan chan Job         // channel for new scheduled jobs
 	scheduledJobRmChan  chan int64       // channel for removing jobs that are completed
@@ -56,6 +57,7 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 		leader,
 		make(chan Job, 1000000),
 		make(chan int),
+		make(chan chan Job),
 		make([]Job, 0),
 		make(chan Job, 1000000),
 		make(chan int64),
@@ -117,8 +119,10 @@ func (gs *GridSdr) updateScheduledJobs() {
 			}
 		case job := <-gs.scheduledJobAddChan:
 			gs.scheduledJobs[job.ID] = job
+
 		case id := <-gs.scheduledJobRmChan:
 			delete(gs.scheduledJobs, id)
+
 		case c := <-gs.scheduledJobReqChan:
 			for _, v := range gs.scheduledJobs {
 				c <- v
@@ -177,6 +181,12 @@ func (gs *GridSdr) scheduleJobs() {
 
 		case n := <-gs.incomingJobRmChan:
 			gs.incomingJobs = gs.incomingJobs[n:]
+
+		case c := <-gs.incomingJobReqChan:
+			for _, j := range gs.incomingJobs {
+				c <- j
+			}
+			close(c)
 		}
 	}
 }
@@ -217,7 +227,7 @@ func (gs *GridSdr) rescheduleJobs(jobs []Job) {
 			delete(gs.scheduledJobs, job.ID)
 			ids[i] = job.ID
 		}
-		// for others
+		// and for others
 		rpcInt64sGo(common.SliceFromMap(gs.gsNodes.GetAll()), &ids, rpcRemoveCompletedJobs)
 
 		// add back to incoming list for myself
@@ -225,7 +235,7 @@ func (gs *GridSdr) rescheduleJobs(jobs []Job) {
 			job.ResMan = ""
 			gs.incomingJobAddChan <- job
 		}
-		// for others
+		// and for others
 		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), &jobs, rpcSyncJobs)
 
 		c <- 0
@@ -414,14 +424,13 @@ func (gs *GridSdr) RecvMsg(args *RPCArgs, reply *int) error {
 	return nil
 }
 
-// RecvJobs appends new jobs into the jobs queue.
+// AddJobs appends new jobs into the jobs queue.
 // NOTE: this function should not be called directly by the client, it requires CS.
-func (gs *GridSdr) RecvJobs(jobs *[]Job, reply *int) error {
+func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
 	log.Printf("%v new incoming jobs.\n", len(*jobs))
 	for _, job := range *jobs {
 		gs.incomingJobAddChan <- job
 	}
-	// jobsToChan(*jobs, gs.incomingJobAddChan)
 	*reply = 0
 	return nil
 }
@@ -432,7 +441,6 @@ func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
 	for _, job := range *jobs {
 		gs.scheduledJobAddChan <- job
 	}
-	// jobsToChan(*jobs, gs.scheduledJobAddChan)
 	*reply = 0
 	return nil
 }
@@ -440,7 +448,6 @@ func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
 func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 	log.Printf("Dropping %v jobs\n", *n)
 	gs.incomingJobRmChan <- *n
-	// dropJobs(*n, gs.incomingJobAddChan)
 	*reply = 0
 	return nil
 }
@@ -477,14 +484,14 @@ func (gs *GridSdr) RemoveCompletedJobs(jobs *[]int64, reply *int) error {
 	return nil
 }
 
-// AddJobsTask is called by the client to add job(s) to the tasks queue, it returns when the job is synchronised.
-func (gs *GridSdr) AddJobsTask(jobs *[]Job, reply *int) error {
+// AddJobsViaUser is called by the client to add job(s) to the tasks queue, it returns when the job is synchronised.
+func (gs *GridSdr) AddJobsViaUser(jobs *[]Job, reply *int) error {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
 		// add jobs to myself
 		// TODO more elegant if RPC call on myself
 		r := -1
-		e := gs.RecvJobs(jobs, &r)
+		e := gs.AddJobs(jobs, &r)
 
 		// add jobs to the others
 		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcSyncJobs)
