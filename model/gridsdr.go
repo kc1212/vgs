@@ -3,6 +3,7 @@ package model
 import (
 	"log"
 	"net/rpc"
+	"sync"
 	"time"
 )
 
@@ -20,11 +21,11 @@ type GridSdr struct {
 	incomingJobAddChan  chan Job          // when user adds a job, it comes here
 	incomingJobRmChan   chan int
 	incomingJobReqChan  chan chan Job
-	incomingJobs        []Job
+	incomingJobs        []Job            // only accessible in the incomingJobs select statement
 	scheduledJobAddChan chan Job         // channel for new scheduled jobs
 	scheduledJobRmChan  chan int64       // channel for removing jobs that are completed
 	scheduledJobReqChan chan chan Job    // channel inside a channel to sync with new GS when it's online
-	scheduledJobs       map[int64]Job    // when GS schedules a job, it gets stored here via the two channels
+	scheduledJobs       map[int64]Job    // only accessible in the scheduleJobs select statement
 	tasks               chan common.Task // these tasks require critical section (CS)
 	inElection          *common.SyncedVal
 	mutexRespChan       chan int
@@ -41,6 +42,12 @@ type RPCArgs struct {
 	Addr  string
 	Type  common.MsgType
 	Clock int64
+}
+
+type GridSdrState struct {
+	IncomingJobs  []Job
+	ScheduledJobs []Job
+	Clock         int64
 }
 
 // InitGridSdr creates a grid scheduler.
@@ -92,10 +99,6 @@ func (gs *GridSdr) Run() {
 	gs.scheduleJobs()
 }
 
-func (gs *GridSdr) imLeader() bool {
-	return gs.leader == gs.Addr
-}
-
 func (gs *GridSdr) updateScheduledJobs() {
 	for {
 		timeout := time.After(100 * time.Millisecond)
@@ -115,7 +118,7 @@ func (gs *GridSdr) updateScheduledJobs() {
 				}
 			}
 			if len(toBeRescheduled) > 0 {
-				gs.rescheduleJobs(toBeRescheduled) // blocks
+				gs.rescheduleJobsAsTask(toBeRescheduled) // blocks
 			}
 		case job := <-gs.scheduledJobAddChan:
 			gs.scheduledJobs[job.ID] = job
@@ -130,18 +133,6 @@ func (gs *GridSdr) updateScheduledJobs() {
 			close(c)
 		}
 	}
-}
-
-func (gs *GridSdr) getAliveRMs() map[string]common.IntClient {
-	res := make(map[string]common.IntClient)
-	for k, v := range gs.rmNodes.GetAll() {
-		remote, e := rpc.DialHTTP("tcp", k)
-		if e == nil {
-			res[k] = v
-			remote.Close()
-		}
-	}
-	return res
 }
 
 func (gs *GridSdr) scheduleJobs() {
@@ -171,7 +162,7 @@ func (gs *GridSdr) scheduleJobs() {
 			for i := range jobs {
 				jobs[i].ResMan = addr
 			}
-			gs.runJobsTask(jobs, addr) // this function blocks util the task finishes executing
+			gs.runJobsAsTask(jobs, addr) // this function blocks util the task finishes executing
 
 		case job := <-gs.incomingJobAddChan:
 			// take all the jobs in the channel and put them in the slice
@@ -191,24 +182,37 @@ func (gs *GridSdr) scheduleJobs() {
 	}
 }
 
-// runJobsTask pushes to tasks channel, it blocks until the task is completed
+func (gs *GridSdr) getAliveRMs() map[string]common.IntClient {
+	res := make(map[string]common.IntClient)
+	for k, v := range gs.rmNodes.GetAll() {
+		remote, e := rpc.DialHTTP("tcp", k)
+		if e == nil {
+			res[k] = v
+			remote.Close()
+		}
+	}
+	return res
+}
+
+// runJobsAsTask pushes to tasks channel, it blocks until the task is completed
+// it should not write to any incomingJob* channels
 // TODO: rmAddr is contained in jobs already, we can possibly reduce redundancy
-func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
+func (gs *GridSdr) runJobsAsTask(jobs []Job, rmAddr string) {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
 		// send the job to RM
 		reply, e := rpcAddJobsToRM(rmAddr, &jobs)
 
-		// add jobs to the submitted list for all GSs
-		// jobsToChan(jobs, gs.scheduledJobAddChan) // for myself
+		// add jobs to the submitted list for all GSs to myself
 		for _, job := range jobs {
 			gs.scheduledJobAddChan <- job
 		}
+		// and for others
 		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), &jobs, rpcSyncScheduledJobs)
 
-		// remove jobs from the incomingJobs list
-		// gs.incomingJobRmChan <- len(jobs) // for myself
-		gs.incomingJobs = gs.incomingJobs[len(jobs):] // NOTE: don't use channel in its own select statement!
+		// remove jobs from the incomingJobs list for myself
+		gs.incomingJobs = gs.incomingJobs[len(jobs):]
+		// and for others
 		rpcIntGo(common.SliceFromMap(gs.gsNodes.GetAll()), len(jobs), rpcDropJobs)
 
 		c <- 0
@@ -217,8 +221,9 @@ func (gs *GridSdr) runJobsTask(jobs []Job, rmAddr string) {
 	<-c
 }
 
-// runs in the scheduleJobs select
-func (gs *GridSdr) rescheduleJobs(jobs []Job) {
+// rescheduleJobsAsTask runs in the scheduleJobs select statement
+// it should not write into any other scheduledJob* channels
+func (gs *GridSdr) rescheduleJobsAsTask(jobs []Job) {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
 		// remove it from scheduled jobs for myself
@@ -352,6 +357,10 @@ func (gs *GridSdr) releaseCritSection() {
 			return
 		}
 	}
+}
+
+func (gs *GridSdr) imLeader() bool {
+	return gs.leader == gs.Addr
 }
 
 // elect implements the Bully algorithm.
@@ -502,6 +511,66 @@ func (gs *GridSdr) AddJobsViaUser(jobs *[]Job, reply *int) error {
 	<-c
 	*reply = 0
 	return nil
+}
+
+// TODO some repeated code in this function
+func (gs *GridSdr) SyncState(x *int, state *GridSdrState) {
+	// doesn't matter what x is
+
+	wg := sync.WaitGroup{}
+
+	// send request to the incoming jobs select loop and retrieve the result
+	incomingChan := make(chan Job)
+	incomingJobs := make([]Job, 0)
+	gs.incomingJobReqChan <- incomingChan
+	go func() {
+		wg.Add(1)
+		defer wg.Done()
+		for job := range incomingChan {
+			incomingJobs = append(incomingJobs, job)
+		}
+	}()
+
+	scheduledChan := make(chan Job)
+	scheduledJobs := make([]Job, 0)
+	gs.scheduledJobReqChan <- scheduledChan
+	go func() {
+		wg.Add(1)
+		defer wg.Done()
+		for job := range scheduledChan {
+			scheduledJobs = append(scheduledJobs, job)
+		}
+	}()
+
+	wg.Wait()
+
+	state.Clock = gs.clock.Geti64()
+	state.IncomingJobs = incomingJobs
+	state.ScheduledJobs = scheduledJobs
+}
+
+// updateStateLatest finds the state with the latest Lamport clock and then copies that state to myself
+func (gs *GridSdr) updateStateLatest(states []GridSdrState) {
+	latestIdx := 0
+	latestClock := int64(0)
+	for i := range states {
+		if clk := states[i].Clock; latestClock < clk {
+			latestClock = clk
+			latestIdx = i
+		}
+	}
+
+	gs.updateState(states[latestIdx])
+}
+
+func (gs *GridSdr) updateState(state GridSdrState) {
+	gs.clock.Set(state.Clock)
+	for _, job := range state.IncomingJobs {
+		gs.incomingJobAddChan <- job
+	}
+	for _, job := range state.ScheduledJobs {
+		gs.scheduledJobAddChan <- job
+	}
 }
 
 // runTasks queries the tasks queue and if there are outstanding tasks it will request for critical and run the tasks.
