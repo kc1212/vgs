@@ -25,7 +25,7 @@ func cli() {
 	nodeType := flag.String("type", "gs", "add job on \"gs\" or \"rm\"")
 	flag.Parse()
 
-	if *nodeType != "gs" || *nodeType != "rm" {
+	if *nodeType != "gs" && *nodeType != "rm" {
 		flag.PrintDefaults()
 		return
 	}
@@ -50,11 +50,11 @@ func cli() {
 
 	if *nodeType == "gs" {
 		if e := remote.Call("GridSdr.AddJobsViaUser", &jobs, &reply); e != nil {
-			log.Printf("Remote call GridSdr.AddJobsViaUser failed on %v, %v\n", addr, e.Error())
+			log.Printf("Remote call GridSdr.AddJobsViaUser failed on %v, %v\n", *addr, e.Error())
 		}
 	} else if *nodeType == "rm" {
 		if e := remote.Call("ResMan.AddJobsViaUser", &jobs, &reply); e != nil {
-			log.Printf("Remote call ResMan.AddJobsViaUser failed on %v, %v\n", addr, e.Error())
+			log.Printf("Remote call ResMan.AddJobsViaUser failed on %v, %v\n", *addr, e.Error())
 		}
 	}
 }
