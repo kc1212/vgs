@@ -496,6 +496,23 @@ func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
 	return nil
 }
 
+func (gs *GridSdr) RecvScheduledJobsFromRM(jobs *[]Job, reply *int) error {
+	c := make(chan int)
+	gs.tasks <- func() (interface{}, error) {
+		// add jobs to the submitted list for all GSs to myself
+		for _, job := range *jobs {
+			gs.scheduledJobAddChan <- job
+		}
+		// and for others
+		r := rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcSyncScheduledJobs)
+		c <- 0
+		return r, nil
+	}
+	<-c
+	*reply = 0
+	return nil
+}
+
 func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 	log.Printf("Dropping %v jobs\n", *n)
 	gs.incomingJobRmChan <- *n

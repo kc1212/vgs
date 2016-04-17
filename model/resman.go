@@ -47,6 +47,30 @@ func (rm *ResMan) Run() {
 	rm.handleCompletionMsg()
 }
 
+// TODO generalise this pattern of trying all GS until one works
+func (rm *ResMan) updateScheduledJobs(jobs *[]Job) int {
+	log.Printf("Updating %v scheduled jobs to GS\n", len(*jobs))
+	// range over map is random
+	reply := -1
+	for k := range rm.gsNodes.GetAll() {
+		remote, e := rpc.DialHTTP("tcp", k)
+		if e != nil {
+			log.Printf("Node %v is not online, make sure to use the correct address?\n", k)
+			continue
+		}
+		defer remote.Close()
+
+		if e := remote.Call("GridSdr.RecvScheduledJobsFromRM", jobs, &reply); e != nil {
+			log.Printf("Remote call GridSdr.RecvScheduledJobsFromRM failed on %v, %v\n", k, e.Error())
+		} else {
+			return reply
+		}
+	}
+	// unreachable
+	log.Panic("At least one GS should be online!")
+	return -1
+}
+
 func (rm *ResMan) forwardJobs(jobs *[]Job) int {
 	log.Printf("Forwarding %v jobs to GS\n", len(*jobs))
 	// range over map is random
@@ -78,7 +102,11 @@ func (rm *ResMan) AddJobsViaUser(jobs *[]Job, reply *int) error {
 	if rm.computeCapacity() == 0 {
 		rm.forwardJobs(jobs)
 	} else {
-		// TODO put the scheduled jobs into GS's scheduled jobs queue
+		// update address so GridSdr does not re-schedule it
+		for i := range *jobs {
+			(*jobs)[i].ResMan = rm.Addr
+		}
+		rm.updateScheduledJobs(jobs)
 		rm.scheduleJobs(jobs)
 	}
 	*reply = 0
