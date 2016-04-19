@@ -20,6 +20,9 @@ rm_start=3101
 gs_end=$(printf "30%02d" "$1")
 rm_end=$(printf "31%02d" "$2")
 
+# first kill everything else
+./destroy.sh
+
 # start discosrv and wait a bit
 ./bin/discosrv 1>&2 2>"$HOME/tmp/discosrv.log" &
 sleep 1
