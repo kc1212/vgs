@@ -5,7 +5,7 @@ set -u
 
 function usage {
     echo "usage:"
-    echo "./cluster_run.sh <gs count> <rm count>"
+    echo "./run.sh <gs count> <rm count>"
 }
 
 if [ "$#" -ne 2 ]; then

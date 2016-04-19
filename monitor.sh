@@ -5,7 +5,7 @@ set -u
 
 function usage {
     echo "usage:"
-    echo "./kill.sh (gridsdr|resman) <id>"
+    echo "./monitor.sh (gridsdr|resman) <id>"
 }
 
 if [ "$#" -ne 2 ]; then
@@ -16,8 +16,4 @@ fi
 
 p=$1
 id=$2
-pid=$(ps -e -o pid,cmd | egrep './bin/'"$p"'.*-id\s'"$id" | sed 's/\s\.\/bin\/'"$p"'.*//g')
-
-kill "$pid"
-
-
+tail -f "$HOME/tmp/$p.$id.log"
