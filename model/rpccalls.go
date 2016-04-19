@@ -9,7 +9,7 @@ import (
 import "github.com/kc1212/virtual-grid/common"
 
 func rpcSendMsgToRM(addr string, args *RPCArgs) (int, error) {
-	log.Printf("Sending message %v to %v\n", *args, addr)
+	// log.Printf("Sending message %v to %v\n", *args, addr)
 	reply, e := common.DialAndCallNoFail(addr, "ResMan.RecvMsg", args)
 	return reply, e
 }
@@ -68,7 +68,7 @@ func rpcGetState(addr string, x int) (GridSdrState, error) {
 	}
 	defer remote.Close()
 	e2 := common.RemoteCallNoFail(remote, "GridSdr.GetState", &x, &reply)
-	log.Printf("Found state %v on %v\n", reply, addr)
+	log.Printf("Found state of size %v and %v on %v\n", len(reply.IncomingJobs), len(reply.ScheduledJobs), addr)
 	return reply, e2
 }
 
