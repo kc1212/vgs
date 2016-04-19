@@ -345,7 +345,7 @@ func (gs *GridSdr) obtainCritSection() {
 	}
 
 	if len(gs.mutexRespChan) != 0 {
-		log.Panic("Nodes following the protocol shouldn't send more messages")
+		log.Panicf("Nodes following the protocol shouldn't send more messages, we have %v\n", len(gs.mutexRespChan))
 	}
 
 	gs.mutexState.Set(common.StateWanted)
