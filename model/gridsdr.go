@@ -92,16 +92,14 @@ func (gs *GridSdr) Run() {
 	gs.notifyAndPopulateRMs(reply.RMs)
 
 	// update my own state to the latest one available
-	states := gs.getStates()
-	gs.updateStateLatest(states)
+	go common.RunRPC(gs, gs.Addr)
+	go gs.runTasks()
+	gs.updateState()
 
 	// start all the services
 	go discosrv.ImAlivePoll(gs.Addr, gs.Type, gs.discosrvAddr)
-	go common.RunRPC(gs, gs.Addr)
 	go gs.pollLeader()
-	go gs.runTasks()
 	go gs.updateScheduledJobs()
-
 	gs.scheduleJobs()
 }
 
@@ -177,6 +175,7 @@ func (gs *GridSdr) scheduleJobs() {
 			gs.incomingJobs = append(gs.incomingJobs, rest...)
 
 		case n := <-gs.incomingJobRmChan:
+			// TODO this part sometimes goes out of bound
 			gs.incomingJobs = gs.incomingJobs[n:]
 
 		case c := <-gs.incomingJobReqChan:
@@ -283,28 +282,26 @@ func (gs *GridSdr) getRMCapacities() map[string]int64 {
 	return capacities
 }
 
-func (gs *GridSdr) getStates() []GridSdrState {
-	res := make([]GridSdrState, 0)
-	nodes := gs.gsNodes.GetAll()
-	resChan := make(chan GridSdrState, len(nodes))
-	wg := sync.WaitGroup{}
-	for node := range nodes {
-		wg.Add(1)
-		go func(addr string) {
-			defer wg.Done()
+// updateState requests for CS and then grabs the state of a random GS
+func (gs *GridSdr) updateState() {
+	if len(gs.gsNodes.GetAll()) == 0 {
+		return
+	}
+
+	c := make(chan int)
+	gs.tasks <- func() (interface{}, error) {
+		nodes := gs.gsNodes.GetAll()
+		for addr := range nodes {
 			s, e := rpcGetState(addr, 0)
 			if e == nil {
-				resChan <- s
+				gs.copyState(s)
+				break
 			}
-		}(node)
+		}
+		c <- 0
+		return 0, nil
 	}
-	wg.Wait()
-
-	close(resChan)
-	for r := range resChan {
-		res = append(res, r)
-	}
-	return res
+	<-c
 }
 
 func (gs *GridSdr) notifyAndPopulateGSs(nodes []string) {
@@ -348,7 +345,7 @@ func (gs *GridSdr) obtainCritSection() {
 	}
 
 	if len(gs.mutexRespChan) != 0 {
-		log.Panic("Nodes following the protocol shouldn't send more messages")
+		log.Panicf("Nodes following the protocol shouldn't send more messages, we have %v\n", len(gs.mutexRespChan))
 	}
 
 	gs.mutexState.Set(common.StateWanted)
@@ -609,25 +606,7 @@ func (gs *GridSdr) GetState(x *int, state *GridSdrState) error {
 	return nil
 }
 
-// updateStateLatest finds the state with the latest Lamport clock and then copies that state to myself
-func (gs *GridSdr) updateStateLatest(states []GridSdrState) {
-	if len(states) == 0 {
-		return
-	}
-
-	latestIdx := 0
-	latestClock := int64(0)
-	for i := range states {
-		if clk := states[i].Clock; latestClock < clk {
-			latestClock = clk
-			latestIdx = i
-		}
-	}
-
-	gs.updateState(states[latestIdx])
-}
-
-func (gs *GridSdr) updateState(state GridSdrState) {
+func (gs *GridSdr) copyState(state GridSdrState) {
 	gs.clock.Set(state.Clock)
 	for _, job := range state.IncomingJobs {
 		gs.incomingJobAddChan <- job
@@ -643,6 +622,9 @@ func (gs *GridSdr) runTasks() {
 		// check whether there are tasks that needs running every 100ms
 		time.Sleep(100 * time.Millisecond)
 		if len(gs.tasks) > 0 {
+			// start a timer and calculated the that GS is using the critical section
+			start := time.Now()
+
 			// acquire CS, run the tasks, run for 1ms at most, then release CS
 			gs.obtainCritSection()
 			timeout := time.After(100 * time.Millisecond)
@@ -662,6 +644,9 @@ func (gs *GridSdr) runTasks() {
 				}
 			}
 			gs.releaseCritSection()
+
+			// record the time spent in critical section
+			log.Printf("Spent %v in CS\n", time.Now().Sub(start))
 		}
 	}
 }
