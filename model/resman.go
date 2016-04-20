@@ -101,8 +101,8 @@ func (rm *ResMan) forwardJobs(jobs *[]Job) int {
 func (rm *ResMan) AddJobsViaUser(jobs *[]Job, reply *int) error {
 	log.Printf("%v jobs received from user \n", len(*jobs))
 
-	// forward the jobs to a random GS if I have no capacity, otherwise schedule them
-	if rm.computeCapacity() == 0 {
+	// forward the jobs to a random GS if I don't have enough capacity, otherwise schedule them
+	if rm.computeCapacity() < len(*jobs) {
 		rm.forwardJobs(jobs)
 	} else {
 		// update address so GridSdr does not re-schedule it
