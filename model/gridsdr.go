@@ -186,8 +186,12 @@ func (gs *GridSdr) scheduleJobs() {
 			gs.incomingJobs = append(gs.incomingJobs, rest...)
 
 		case n := <-gs.incomingJobRmChan:
-			// TODO this part sometimes goes out of bound
-			gs.incomingJobs = gs.incomingJobs[n:]
+			if n > len(gs.incomingJobs) {
+				log.Printf("Dropping %v jobs when there are only %v available.", n, len(gs.incomingJobs))
+				gs.incomingJobs = make([]Job, 0)
+			} else {
+				gs.incomingJobs = gs.incomingJobs[n:]
+			}
 
 		case c := <-gs.incomingJobReqChan:
 			for _, j := range gs.incomingJobs {
@@ -220,16 +224,22 @@ func (gs *GridSdr) runJobsAsTask(jobs []Job, rmAddr string) {
 		reply, e := rpcAddJobsToRM(rmAddr, &jobs)
 
 		// add jobs to the submitted list for all GSs to myself
-		for _, job := range jobs {
-			gs.scheduledJobAddChan <- job
-		}
+		var dummy int
+		gs.RecvScheduledJobs(&jobs, &dummy)
 		// and for others
 		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), &jobs, rpcSyncScheduledJobs)
 
 		// remove jobs from the incomingJobs list for myself
-		gs.incomingJobs = gs.incomingJobs[len(jobs):]
+		// note that we can't write to the incomingJobRmChan because this functions runs in the incomingJob* select statement
+		n := len(jobs)
+		if n > len(gs.incomingJobs) {
+			log.Printf("Dropping %v jobs when there are only %v available.", n, len(gs.incomingJobs))
+			gs.incomingJobs = make([]Job, 0)
+		} else {
+			gs.incomingJobs = gs.incomingJobs[n:]
+		}
 		// and for others
-		rpcIntGo(common.SliceFromMap(gs.gsNodes.GetAll()), len(jobs), rpcDropJobs)
+		rpcIntGo(common.SliceFromMap(gs.gsNodes.GetAll()), n, rpcDropJobs)
 
 		c <- 0
 		return reply, e
