@@ -345,7 +345,17 @@ func (gs *GridSdr) obtainCritSection() {
 	}
 
 	if len(gs.mutexRespChan) != 0 {
-		log.Panicf("Nodes following the protocol shouldn't send more messages, we have %v\n", len(gs.mutexRespChan))
+		// it's still possible that this channel isn't empty,
+		// because existing GS may send message to me when I just come back online
+		log.Printf("Nodes following the protocol shouldn't send more messages, we have %v\n", len(gs.mutexRespChan))
+	loop1:
+		for {
+			select {
+			case <-gs.mutexRespChan:
+			default:
+				break loop1
+			}
+		}
 	}
 
 	gs.mutexState.Set(common.StateWanted)
@@ -359,7 +369,7 @@ func (gs *GridSdr) obtainCritSection() {
 	// wait until others has written to mutexRespChan or time out (5s)
 	cnt := 0
 	timeout := time.After(5 * time.Second)
-loop:
+loop2:
 	for {
 		if cnt >= successes {
 			break
@@ -368,7 +378,8 @@ loop:
 		case <-gs.mutexRespChan:
 			cnt++
 		case <-timeout:
-			break loop
+			log.Printf("CS Timeout!")
+			break loop2
 		}
 	}
 
@@ -378,7 +389,7 @@ loop:
 
 	// here we're in critical section
 	gs.mutexState.Set(common.StateHeld)
-	log.Println("In CS!", gs.ID)
+	log.Println("CS In!")
 }
 
 // releaseCritSection sets the mutexState to StateReleased and then runs all the queued requests.
@@ -392,7 +403,7 @@ func (gs *GridSdr) releaseCritSection() {
 				log.Panic("request failed with", e)
 			}
 		default:
-			log.Println("Out CS!", gs.ID)
+			log.Println("CS Out!")
 			return
 		}
 	}
