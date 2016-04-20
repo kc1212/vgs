@@ -1,6 +1,8 @@
 package model
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"net/rpc"
 	"sync"
@@ -34,6 +36,7 @@ type GridSdr struct {
 	clock               *common.SyncedVal
 	reqClock            int64
 	discosrvAddr        string
+	ready               *common.SyncedVal
 }
 
 // RPCArgs is the arguments for RPC calls between grid schedulers and/or resource maanagers
@@ -78,6 +81,7 @@ func InitGridSdr(id int, addr string, dsAddr string) GridSdr {
 		&common.SyncedVal{V: int64(0)},
 		0,
 		dsAddr,
+		&common.SyncedVal{V: false},
 	}
 }
 
@@ -91,21 +95,27 @@ func (gs *GridSdr) Run() {
 	gs.notifyAndPopulateGSs(reply.GSs)
 	gs.notifyAndPopulateRMs(reply.RMs)
 
-	// update my own state to the latest one available
-	go common.RunRPC(gs, gs.Addr)
-	go gs.runTasks()
-	gs.updateState()
-
-	// start all the services
-	go discosrv.ImAlivePoll(gs.Addr, gs.Type, gs.discosrvAddr)
+	// start all the go routines, order doesn't matter,
+	// note that some may not have an effect until the GS is ready
 	go gs.pollLeader()
+	go gs.runTasks()
+	go discosrv.ImAlivePoll(gs.Addr, gs.Type, gs.discosrvAddr)
 	go gs.updateScheduledJobs()
-	gs.scheduleJobs()
+	go gs.scheduleJobs()
+	go common.RunRPC(gs, gs.Addr)
+
+	gs.updateState()
+	gs.ready.Set(true)
+
+	for {
+		time.Sleep(time.Minute)
+	}
 }
 
 func (gs *GridSdr) updateScheduledJobs() {
 	for {
 		timeout := time.After(100 * time.Millisecond)
+
 		select {
 		case <-timeout:
 			// every `timeout` check the RMs and see whether they're up
@@ -410,7 +420,7 @@ func (gs *GridSdr) releaseCritSection() {
 }
 
 func (gs *GridSdr) imLeader() bool {
-	return gs.leader == gs.Addr
+	return gs.leader == gs.Addr && !gs.inElection.Get().(bool)
 }
 
 // elect implements the Bully algorithm.
@@ -447,157 +457,6 @@ func (gs *GridSdr) elect() {
 	// artificially make the election last longer so that multiple messages
 	// requests won't initialise multiple election runs
 	time.Sleep(time.Second)
-}
-
-// RecvMsg is called remotely, it updates the Lamport clock first and then performs tasks depending on the message type.
-func (gs *GridSdr) RecvMsg(args *RPCArgs, reply *int) error {
-	log.Printf("Msg received %v\n", *args)
-	*reply = 1
-	gs.clock.Set(common.Max64(gs.clock.Geti64(), args.Clock) + 1) // update Lamport clock
-	if args.Type == common.CoordinateMsg {
-		gs.leader = args.Addr
-		log.Printf("Leader set to %v\n", gs.leader)
-
-	} else if args.Type == common.ElectionMsg {
-		// don't start a new election if one is already running
-		if !gs.inElection.Get().(bool) {
-			go gs.elect()
-		}
-	} else if args.Type == common.MutexReq {
-		go gs.respCritSection(*args)
-
-	} else if args.Type == common.MutexResp {
-		gs.mutexRespChan <- 0
-
-	} else if args.Type == common.GSUpMsg {
-		*reply = gs.ID
-		gs.gsNodes.SetInt(args.Addr, int64(args.ID))
-
-	} else if args.Type == common.RMUpMsg {
-		*reply = gs.ID
-		gs.rmNodes.SetInt(args.Addr, int64(args.ID))
-
-	} else {
-		log.Panic("Invalid message!", args)
-	}
-	return nil
-}
-
-// AddJobs appends new jobs into the jobs queue.
-// NOTE: this function should not be called directly by the client, it requires CS.
-func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
-	log.Printf("%v new incoming jobs.\n", len(*jobs))
-	for _, job := range *jobs {
-		gs.incomingJobAddChan <- job
-	}
-	*reply = 0
-	return nil
-}
-
-// NOTE: this function should not be called directly by the client, it requires CS.
-func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
-	log.Printf("Adding %v scheduled jobs.\n", len(*jobs))
-	for _, job := range *jobs {
-		gs.scheduledJobAddChan <- job
-	}
-	*reply = 0
-	return nil
-}
-
-func (gs *GridSdr) DropJobs(n *int, reply *int) error {
-	log.Printf("Dropping %v jobs\n", *n)
-	gs.incomingJobRmChan <- *n
-	*reply = 0
-	return nil
-}
-
-// SyncCompletedJobs is called by the RM when job(s) are completed.
-// We acquire a critical section and propogate the change to everybody.
-func (gs *GridSdr) SyncCompletedJobs(jobs *[]int64, reply *int) error {
-	c := make(chan int)
-	gs.tasks <- func() (interface{}, error) {
-		// remove it from myself too
-		// TODO this is repeated code, more elegant if RPC call can be done on myself too
-		for _, job := range *jobs {
-			delete(gs.scheduledJobs, job)
-		}
-
-		// remove it from everybody else
-		rpcInt64sGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcRemoveCompletedJobs)
-
-		c <- 0
-		return 0, nil
-	}
-	<-c
-	*reply = 0
-	return nil
-}
-
-// RemoveCompletedJobs is called by another GS to remove job(s) from the scheduledJobAddChan
-func (gs *GridSdr) RemoveCompletedJobs(jobs *[]int64, reply *int) error {
-	log.Printf("I'm removing %v jobs.\n", len(*jobs))
-	for _, job := range *jobs {
-		gs.scheduledJobRmChan <- job
-	}
-	*reply = 0
-	return nil
-}
-
-// AddJobsViaUser is called by the client to add job(s) to the tasks queue, it returns when the job is synchronised.
-func (gs *GridSdr) AddJobsViaUser(jobs *[]Job, reply *int) error {
-	c := make(chan int)
-	gs.tasks <- func() (interface{}, error) {
-		// add jobs to myself
-		// TODO more elegant if RPC call on myself
-		r := -1
-		e := gs.AddJobs(jobs, &r)
-
-		// add jobs to the others
-		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcSyncJobs)
-
-		c <- 0
-		return r, e
-	}
-	<-c
-	*reply = 0
-	return nil
-}
-
-// TODO some repeated code in this function
-func (gs *GridSdr) GetState(x *int, state *GridSdrState) error {
-	// doesn't matter what x is
-
-	wg := sync.WaitGroup{}
-	state.Clock = gs.clock.Geti64()
-
-	// send request to the incoming jobs select loop and retrieve the result
-	incomingChan := make(chan Job)
-	gs.incomingJobReqChan <- incomingChan
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		jobs := make([]Job, 0)
-		for job := range incomingChan {
-			jobs = append(jobs, job)
-		}
-		state.IncomingJobs = jobs
-	}()
-
-	scheduledChan := make(chan Job)
-	gs.scheduledJobReqChan <- scheduledChan
-	wg.Add(1)
-	go func() {
-		jobs := make([]Job, 0)
-		defer wg.Done()
-		for job := range scheduledChan {
-			jobs = append(jobs, job)
-		}
-		state.ScheduledJobs = jobs
-	}()
-
-	wg.Wait()
-
-	return nil
 }
 
 func (gs *GridSdr) copyState(state GridSdrState) {
@@ -684,4 +543,200 @@ func (gs *GridSdr) pollLeader() {
 			remote.Close()
 		}
 	}
+}
+
+/*
+ * RPC Calls after this point
+ */
+
+// RecvMsg is called remotely, it updates the Lamport clock first and then performs tasks depending on the message type.
+// Note that this RPC call works when the GS is not ready.
+func (gs *GridSdr) RecvMsg(args *RPCArgs, reply *int) error {
+	log.Printf("Msg received %v\n", *args)
+	*reply = 1
+	gs.clock.Set(common.Max64(gs.clock.Geti64(), args.Clock) + 1) // update Lamport clock
+	if args.Type == common.CoordinateMsg {
+		gs.leader = args.Addr
+		log.Printf("Leader set to %v\n", gs.leader)
+
+	} else if args.Type == common.ElectionMsg {
+		// don't start a new election if one is already running
+		if !gs.inElection.Get().(bool) {
+			go gs.elect()
+		}
+	} else if args.Type == common.MutexReq {
+		go gs.respCritSection(*args)
+
+	} else if args.Type == common.MutexResp {
+		gs.mutexRespChan <- 0
+
+	} else if args.Type == common.GSUpMsg {
+		*reply = gs.ID
+		gs.gsNodes.SetInt(args.Addr, int64(args.ID))
+
+	} else if args.Type == common.RMUpMsg {
+		*reply = gs.ID
+		gs.rmNodes.SetInt(args.Addr, int64(args.ID))
+
+	} else {
+		log.Panic("Invalid message!", args)
+	}
+	return nil
+}
+
+// AddJobs appends new jobs into the jobs queue.
+// NOTE: this function should not be called directly by the client, it requires CS.
+func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
+	if !gs.ready.Get().(bool) {
+		str := fmt.Sprintf("Not adding %v incoming jobs because I'm not ready\n", len(*jobs))
+		log.Print(str)
+		return errors.New(str)
+	}
+
+	log.Printf("%v new incoming jobs.\n", len(*jobs))
+	for _, job := range *jobs {
+		gs.incomingJobAddChan <- job
+	}
+	*reply = 0
+	return nil
+}
+
+// NOTE: this function should not be called directly by the client, it requires CS.
+func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
+	if !gs.ready.Get().(bool) {
+		str := fmt.Sprintf("Not adding %v scheduled jobs because I'm not ready\n", len(*jobs))
+		log.Print(str)
+		return errors.New(str)
+	}
+
+	log.Printf("Adding %v scheduled jobs.\n", len(*jobs))
+	for _, job := range *jobs {
+		gs.scheduledJobAddChan <- job
+	}
+	*reply = 0
+	return nil
+}
+
+func (gs *GridSdr) DropJobs(n *int, reply *int) error {
+	if !gs.ready.Get().(bool) {
+		str := fmt.Sprintf("Not dropping %v jobs because I'm not ready\n", *n)
+		log.Print(str)
+		return errors.New(str)
+	}
+
+	log.Printf("Dropping %v jobs\n", *n)
+	gs.incomingJobRmChan <- *n
+	*reply = 0
+	return nil
+}
+
+// SyncCompletedJobs is called by the RM when job(s) are completed.
+// We acquire a critical section and propogate the change to everybody.
+func (gs *GridSdr) SyncCompletedJobs(jobs *[]int64, reply *int) error {
+	if !gs.ready.Get().(bool) {
+		str := fmt.Sprintf("Can't sync %v completed jobs because I'm not ready\n", len(*jobs))
+		log.Print(str)
+		return errors.New(str)
+	}
+
+	c := make(chan int)
+	gs.tasks <- func() (interface{}, error) {
+		// remove it from myself too
+		// TODO more elegant if RPC call can be done on myself too
+		var dummy int
+		go gs.RemoveCompletedJobs(jobs, &dummy)
+
+		// remove it from everybody else
+		rpcInt64sGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcRemoveCompletedJobs)
+
+		c <- 0
+		return 0, nil
+	}
+	<-c
+	*reply = 0
+	return nil
+}
+
+// RemoveCompletedJobs is called by another GS to remove job(s) from the scheduledJobAddChan
+func (gs *GridSdr) RemoveCompletedJobs(jobs *[]int64, reply *int) error {
+	if !gs.ready.Get().(bool) {
+		str := fmt.Sprintf("Can't remove %v completed jobs because I'm not ready\n", len(*jobs))
+		log.Print(str)
+		return errors.New(str)
+	}
+
+	log.Printf("I'm removing %v jobs.\n", len(*jobs))
+	for _, job := range *jobs {
+		gs.scheduledJobRmChan <- job
+	}
+	*reply = 0
+	return nil
+}
+
+// AddJobsViaUser is called by the client to add job(s) to the tasks queue, it returns when the job is synchronised.
+func (gs *GridSdr) AddJobsViaUser(jobs *[]Job, reply *int) error {
+	if !gs.ready.Get().(bool) {
+		str := fmt.Sprintf("Can't add %v jobs because I'm not ready\n", len(*jobs))
+		log.Print(str)
+		return errors.New(str)
+	}
+
+	c := make(chan int)
+	gs.tasks <- func() (interface{}, error) {
+		// add jobs to myself
+		// TODO more elegant if RPC call on myself
+		r := -1
+		e := gs.AddJobs(jobs, &r)
+
+		// add jobs to the others
+		rpcJobsGo(common.SliceFromMap(gs.gsNodes.GetAll()), jobs, rpcSyncJobs)
+
+		c <- 0
+		return r, e
+	}
+	<-c
+	*reply = 0
+	return nil
+}
+
+// TODO some repeated code in this function
+func (gs *GridSdr) GetState(x *int, state *GridSdrState) error {
+	// doesn't matter what x is
+	if !gs.ready.Get().(bool) {
+		str := fmt.Sprintf("Can't sync state because I'm not ready\n")
+		log.Print(str)
+		return errors.New(str)
+	}
+
+	wg := sync.WaitGroup{}
+	state.Clock = gs.clock.Geti64()
+
+	// send request to the incoming jobs select loop and retrieve the result
+	incomingChan := make(chan Job)
+	gs.incomingJobReqChan <- incomingChan
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		jobs := make([]Job, 0)
+		for job := range incomingChan {
+			jobs = append(jobs, job)
+		}
+		state.IncomingJobs = jobs
+	}()
+
+	scheduledChan := make(chan Job)
+	gs.scheduledJobReqChan <- scheduledChan
+	wg.Add(1)
+	go func() {
+		jobs := make([]Job, 0)
+		defer wg.Done()
+		for job := range scheduledChan {
+			jobs = append(jobs, job)
+		}
+		state.ScheduledJobs = jobs
+	}()
+
+	wg.Wait()
+
+	return nil
 }
