@@ -57,7 +57,7 @@ func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
 	for _, j := range *jobs {
 		// in theory the task can be arbitrary, here we just run Sleep
 		task := func() (interface{}, error) {
-			time.Sleep(time.Duration(j.Duration) * time.Second)
+			time.Sleep(j.Duration)
 			return 0, nil
 		}
 		rm.tasksChan <- WorkerTask{task, j.ID}

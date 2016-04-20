@@ -138,6 +138,7 @@ func (gs *GridSdr) updateScheduledJobs() {
 			gs.scheduledJobs[job.ID] = job
 
 		case id := <-gs.scheduledJobRmChan:
+			// TODO log the finish time
 			delete(gs.scheduledJobs, id)
 
 		case c := <-gs.scheduledJobReqChan:
@@ -631,7 +632,7 @@ func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 }
 
 // SyncCompletedJobs is called by the RM when job(s) are completed.
-// We acquire a critical section and propogate the change to everybody.
+// NOTE: it acquire a critical section and propogate the change to everybody.
 func (gs *GridSdr) SyncCompletedJobs(jobs *[]int64, reply *int) error {
 	if !gs.ready.Get().(bool) {
 		str := fmt.Sprintf("Can't sync %v completed jobs because I'm not ready\n", len(*jobs))
@@ -653,6 +654,7 @@ func (gs *GridSdr) SyncCompletedJobs(jobs *[]int64, reply *int) error {
 		return 0, nil
 	}
 	<-c
+
 	*reply = 0
 	return nil
 }

@@ -1,9 +1,13 @@
 package model
 
+import "time"
+
 type Job struct {
-	ID       int64 // must be unique
-	Duration int64
-	ResMan   string // possibly improve the type?
+	ID         int64 // must be unique
+	Duration   time.Duration
+	ResMan     string // possibly improve the type?
+	StartTime  time.Time
+	FinishTime time.Time
 }
 
 func filterJobs(s []Job, fn func(Job) bool) []Job {
@@ -27,22 +31,6 @@ loop:
 		default:
 			break loop
 		}
-	}
-	return jobs
-}
-
-// chanToJobs attempts to copy all the jobs from a buffered channel
-// without modifying that channel
-// TODO NOT SURE IF THIS IS THE RIGHT WAY TO THIS
-func chanToJobs(c *chan Job, cap int) []Job {
-	jobs := make([]Job, 0)
-	c2 := *c
-	*c = make(chan Job, cap)
-	close(c2)
-
-	for job := range c2 {
-		*c <- job
-		jobs = append(jobs, job)
 	}
 	return jobs
 }
