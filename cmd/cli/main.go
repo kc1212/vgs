@@ -34,11 +34,19 @@ func cli() {
 	jobs := make([]model.Job, *jobsCount)
 	for i := range jobs {
 		jobs[i].ID = rand.Int63()
+		var str string
 		if *duration == 0 {
-			jobs[i].Duration = rand.Int63n(10) + 1
+			str = fmt.Sprintf("%vs", rand.Intn(10)+1)
 		} else {
-			jobs[i].Duration = *duration
+			str = fmt.Sprintf("%vs", *duration)
 		}
+
+		duration, e := time.ParseDuration(str)
+		if e != nil {
+			log.Panic(e)
+		}
+		jobs[i].Duration = duration
+		jobs[i].StartTime = time.Now()
 	}
 
 	reply := -1

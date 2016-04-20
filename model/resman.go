@@ -18,6 +18,7 @@ type ResMan struct {
 	completedChan chan int64
 	capReq        chan int
 	capResp       chan int
+	tallyChan     chan int
 	discosrvAddr  string
 }
 
@@ -28,6 +29,7 @@ func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 		&common.SyncedSet{S: make(map[string]common.IntClient)},
 		make(chan WorkerTask, 1000),
 		make(chan int64),
+		make(chan int),
 		make(chan int),
 		make(chan int),
 		dsAddr}
@@ -44,6 +46,7 @@ func (rm *ResMan) Run() {
 	go discosrv.ImAlivePoll(rm.Addr, common.RMNode, rm.discosrvAddr)
 	go common.RunRPC(rm, rm.Addr)
 	go runWorkers(rm.n, rm.tasksChan, rm.capReq, rm.capResp, rm.completedChan)
+	go rm.reporting()
 	rm.handleCompletionMsg()
 }
 
@@ -127,7 +130,7 @@ func (rm *ResMan) scheduleJobs(jobs *[]Job) {
 	for _, j := range *jobs {
 		// in theory the task can be arbitrary, here we just run Sleep
 		task := func() (interface{}, error) {
-			time.Sleep(time.Duration(j.Duration) * time.Second)
+			time.Sleep(j.Duration)
 			return 0, nil
 		}
 		rm.tasksChan <- WorkerTask{task, j.ID}
@@ -174,6 +177,19 @@ func (rm *ResMan) notifyAndPopulateGSs(nodes []string) {
 	wg.Wait()
 }
 
+func (rm *ResMan) reporting() {
+	tally := 0
+	for {
+		timeout := time.After(5 * time.Second)
+		select {
+		case i := <-rm.tallyChan:
+			tally += i
+		case <-timeout:
+			log.Printf("Job tally: %v\n", tally)
+		}
+	}
+}
+
 // handleCompletionMsg runs forever to notify GSs about job completion
 func (rm *ResMan) handleCompletionMsg() {
 	ids := make([]int64, 0)
@@ -198,6 +214,7 @@ func (rm *ResMan) handleCompletionMsg() {
 		}
 
 		mutex.Lock()
+		rm.tallyChan <- len(ids)
 		log.Printf("Completed %v jobs.\n", len(ids))
 
 		// range over map is random so this is ok
