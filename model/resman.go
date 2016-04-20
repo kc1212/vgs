@@ -2,6 +2,7 @@ package model
 
 import (
 	"log"
+	"net/rpc"
 	"sync"
 	"time"
 )
@@ -49,10 +50,82 @@ func (rm *ResMan) Run() {
 	rm.handleCompletionMsg()
 }
 
-// AddJob RPC call
+// TODO generalise this pattern of trying all GS until one works
+func (rm *ResMan) updateScheduledJobs(jobs *[]Job) int {
+	log.Printf("Updating %v scheduled jobs to GS\n", len(*jobs))
+	// range over map is random
+	reply := -1
+	for k := range rm.gsNodes.GetAll() {
+		remote, e := rpc.DialHTTP("tcp", k)
+		if e != nil {
+			log.Printf("Node %v is not online, make sure to use the correct address?\n", k)
+			continue
+		}
+		defer remote.Close()
+
+		if e := remote.Call("GridSdr.RecvScheduledJobsFromRM", jobs, &reply); e != nil {
+			log.Printf("Remote call GridSdr.RecvScheduledJobsFromRM failed on %v, %v\n", k, e.Error())
+		} else {
+			return reply
+		}
+	}
+	// unreachable
+	log.Panic("At least one GS should be online!")
+	return -1
+}
+
+func (rm *ResMan) forwardJobs(jobs *[]Job) int {
+	log.Printf("Forwarding %v jobs to GS\n", len(*jobs))
+	// range over map is random
+	reply := -1
+	for k := range rm.gsNodes.GetAll() {
+		remote, e := rpc.DialHTTP("tcp", k)
+		if e != nil {
+			log.Printf("Node %v is not online, make sure to use the correct address?\n", k)
+			continue
+		}
+		defer remote.Close()
+
+		if e := remote.Call("GridSdr.AddJobsViaUser", jobs, &reply); e != nil {
+			log.Printf("Remote call GridSdr.AddJobsViaUser failed on %v, %v\n", k, e.Error())
+		} else {
+			return reply
+		}
+	}
+	// unreachable
+	log.Panic("At least one GS should be online!")
+	return -1
+}
+
+// AddJob RPC call, only used by CLI
+func (rm *ResMan) AddJobsViaUser(jobs *[]Job, reply *int) error {
+	log.Printf("%v jobs received from user \n", len(*jobs))
+
+	// forward the jobs to a random GS if I don't have enough capacity, otherwise schedule them
+	if rm.computeCapacity() < len(*jobs) {
+		rm.forwardJobs(jobs)
+	} else {
+		// update address so GridSdr does not re-schedule it
+		for i := range *jobs {
+			(*jobs)[i].ResMan = rm.Addr
+		}
+		rm.updateScheduledJobs(jobs)
+		rm.scheduleJobs(jobs)
+	}
+	*reply = 0
+	return nil
+}
+
+// AddJob RPC call, only used by GridSdr
 func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
 	log.Printf("%v jobs received \n", len(*jobs))
 
+	rm.scheduleJobs(jobs)
+	*reply = 0
+	return nil
+}
+
+func (rm *ResMan) scheduleJobs(jobs *[]Job) {
 	// make a channel of jobs, and then schedule them
 	for _, j := range *jobs {
 		// in theory the task can be arbitrary, here we just run Sleep
@@ -62,8 +135,6 @@ func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
 		}
 		rm.tasksChan <- WorkerTask{task, j.ID}
 	}
-	*reply = 0
-	return nil
 }
 
 // RecvMsg PRC call
@@ -119,6 +190,7 @@ func (rm *ResMan) reporting() {
 	}
 }
 
+// handleCompletionMsg runs forever to notify GSs about job completion
 func (rm *ResMan) handleCompletionMsg() {
 	ids := make([]int64, 0)
 	mutex := sync.Mutex{}
@@ -145,7 +217,7 @@ func (rm *ResMan) handleCompletionMsg() {
 		rm.tallyChan <- len(ids)
 		log.Printf("Completed %v jobs.\n", len(ids))
 
-		// NOTE: range over map is random
+		// range over map is random so this is ok
 		for k := range rm.gsNodes.GetAll() {
 			_, e := rpcSyncCompletedJobs(k, &ids)
 			if e == nil {
