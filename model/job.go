@@ -1,13 +1,13 @@
 package model
 
-type Job struct {
-	ID       int64 // must be unique
-	Duration int64
-	History  []string // possibly improve the type?
-}
+import "time"
 
-func (j *Job) appendHistory(x string) {
-	j.History = append(j.History, x)
+type Job struct {
+	ID         int64 // must be unique
+	Duration   time.Duration
+	ResMan     string // possibly improve the type?
+	StartTime  time.Time
+	FinishTime time.Time
 }
 
 func filterJobs(s []Job, fn func(Job) bool) []Job {
@@ -20,19 +20,9 @@ func filterJobs(s []Job, fn func(Job) bool) []Job {
 	return p
 }
 
-func dropJobs(n int, c <-chan Job) {
-	for i := 0; i < n; i++ {
-		select {
-		case <-c:
-		default:
-			return
-		}
-	}
-}
-
 // takeJobs will take at most n jobs from channel `c`
 func takeJobs(n int, c <-chan Job) []Job {
-	jobs := *new([]Job)
+	jobs := make([]Job, 0)
 loop:
 	for i := 0; i < n; i++ {
 		select {
@@ -43,10 +33,4 @@ loop:
 		}
 	}
 	return jobs
-}
-
-func jobsToChan(jobs []Job, c chan<- Job) {
-	for _, j := range jobs {
-		c <- j
-	}
 }

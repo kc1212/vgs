@@ -2,13 +2,14 @@ package model
 
 import (
 	"log"
+	"net/rpc"
 	"sync"
 )
 
 import "github.com/kc1212/virtual-grid/common"
 
 func rpcSendMsgToRM(addr string, args *RPCArgs) (int, error) {
-	log.Printf("Sending message %v to %v\n", *args, addr)
+	// log.Printf("Sending message %v to %v\n", *args, addr)
 	reply, e := common.DialAndCallNoFail(addr, "ResMan.RecvMsg", args)
 	return reply, e
 }
@@ -27,11 +28,11 @@ func rpcSendMsgToGS(addr string, args *RPCArgs) (int, error) {
 	return reply, e
 }
 
-// rpcAddJobsToGS is a remote call that calls `RecvJobs`.
+// rpcAddJobsToGS is a remote call that calls `AddJobs`.
 // NOTE: this function should only be executed when CS is obtained.
 func rpcSyncJobs(addr string, jobs *[]Job) (int, error) {
 	log.Printf("Syncing %v jobs with GS on %v\n", len(*jobs), addr)
-	reply, e := common.DialAndCallNoFail(addr, "GridSdr.RecvJobs", jobs)
+	reply, e := common.DialAndCallNoFail(addr, "GridSdr.AddJobs", jobs)
 	return reply, e
 }
 
@@ -42,6 +43,7 @@ func rpcSyncScheduledJobs(addr string, jobs *[]Job) (int, error) {
 }
 
 func rpcDropJobs(addr string, n int) (int, error) {
+	log.Printf("Dropping %v jobs on %v\n", n, addr)
 	reply, e := common.DialAndCallNoFail(addr, "GridSdr.DropJobs", &n)
 	return reply, e
 }
@@ -54,6 +56,20 @@ func rpcSyncCompletedJobs(addr string, jobs *[]int64) (int, error) {
 func rpcRemoveCompletedJobs(addr string, jobs *[]int64) (int, error) {
 	reply, e := common.DialAndCallNoFail(addr, "GridSdr.RemoveCompletedJobs", jobs)
 	return reply, e
+}
+
+// TODO can't use the generic common.DialAndCallNoFail because return type is complex, fix it
+func rpcGetState(addr string, x int) (GridSdrState, error) {
+	reply := GridSdrState{}
+	remote, e1 := rpc.DialHTTP("tcp", addr)
+	if e1 != nil {
+		log.Printf("Node %v not online (DialHTTP)\n", addr)
+		return reply, e1
+	}
+	defer remote.Close()
+	e2 := common.RemoteCallNoFail(remote, "GridSdr.GetState", &x, &reply)
+	log.Printf("Found state of size %v and %v on %v\n", len(reply.IncomingJobs), len(reply.ScheduledJobs), addr)
+	return reply, e2
 }
 
 // TODO horrible repeated code
