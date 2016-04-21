@@ -2,7 +2,10 @@ package discosrv
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"net/rpc"
 	"time"
 )
@@ -34,7 +37,9 @@ func (ds *Srv) Run(addr string) {
 	ds.gsSet = &common.SyncedSet{S: make(map[string]common.IntClient)}
 	ds.rmSet = &common.SyncedSet{S: make(map[string]common.IntClient)}
 	go common.RunRPC(ds, addr)
-	ds.runRemoveDead()
+	go ds.runRemoveDead()
+	http.HandleFunc("/", ds.hello)
+	http.ListenAndServe(":8333", nil)
 }
 
 // ImAlive RPC, called by GS or RM to update their status
@@ -60,33 +65,6 @@ func (ds *Srv) ImAlive(args *Args, reply *Reply) error {
 		ds.rmSet.RUnlock()
 	}
 	return nil
-}
-
-func (ds *Srv) runRemoveDead() {
-	for {
-		time.Sleep(time.Second)
-
-		threshold := int64(20)
-		t := time.Now().Unix()
-		log.Printf("%v GS's, %v RM's\n", len(ds.gsSet.GetAll()), len(ds.rmSet.GetAll()))
-
-		// TODO repeated code, loop over the two sets
-		ds.gsSet.Lock()
-		for k := range ds.gsSet.S {
-			if t-ds.gsSet.S[k].ID > threshold {
-				delete(ds.gsSet.S, k)
-			}
-		}
-		ds.gsSet.Unlock()
-
-		ds.rmSet.Lock()
-		for k := range ds.rmSet.S {
-			if t-ds.rmSet.S[k].ID > threshold {
-				delete(ds.rmSet.S, k)
-			}
-		}
-		ds.rmSet.Unlock()
-	}
 }
 
 // TODO some repeated code in "ImAliveProbe" and "ImAlivePoll"
@@ -128,4 +106,36 @@ func ImAlivePoll(nodeAddr string, nodeType common.NodeType, dsAddr string) (Repl
 		common.RemoteCallNoFail(remote, "Srv.ImAlive", &args, &reply)
 		time.Sleep(10 * time.Second)
 	}
+}
+
+func (ds *Srv) runRemoveDead() {
+	for {
+		time.Sleep(time.Second)
+
+		threshold := int64(20)
+		t := time.Now().Unix()
+		log.Printf("%v GSs, %v RMs\n", len(ds.gsSet.GetAll()), len(ds.rmSet.GetAll()))
+
+		// TODO repeated code, loop over the two sets
+		ds.gsSet.Lock()
+		for k := range ds.gsSet.S {
+			if t-ds.gsSet.S[k].ID > threshold {
+				delete(ds.gsSet.S, k)
+			}
+		}
+		ds.gsSet.Unlock()
+
+		ds.rmSet.Lock()
+		for k := range ds.rmSet.S {
+			if t-ds.rmSet.S[k].ID > threshold {
+				delete(ds.rmSet.S, k)
+			}
+		}
+		ds.rmSet.Unlock()
+	}
+}
+
+func (ds *Srv) hello(w http.ResponseWriter, r *http.Request) {
+	msg := fmt.Sprintf("%v GSs, %v RMs\n", len(ds.gsSet.GetAll()), len(ds.rmSet.GetAll()))
+	io.WriteString(w, msg)
 }
