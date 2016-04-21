@@ -40,12 +40,12 @@ fi
 
 # start the GSs
 for i in $(seq "$gs_start" "$gs_end"); do
-    ./bin/gridsdr -addr "$my_addr:$i" -id "$i" -discosrv "$discosrv_addr" 1>&2 2>"$HOME/tmp/gridsdr.$i.log" &
+    ./bin/gridsdr -addr "$my_addr:$i" -id "$RANDOM" -discosrv "$discosrv_addr" 1>&2 2>"$HOME/tmp/gridsdr.$i.log" &
     usleep 200000
 done
 
 # start the RMs
 for i in $(seq "$rm_start" "$rm_end"); do
-    ./bin/resman -addr "$my_addr:$i" -id "$i" -discosrv "$discosrv_addr" 1>&2 2>"$HOME/tmp/resman.$i.log" &
+    ./bin/resman -addr "$my_addr:$i" -id "$RANDOM" -discosrv "$discosrv_addr" 1>&2 2>"$HOME/tmp/resman.$i.log" &
     usleep 200000
 done
