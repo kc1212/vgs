@@ -194,7 +194,7 @@ func (rm *ResMan) reporting() {
 
 // handleCompletionMsg runs forever to notify GSs about job completion
 func (rm *ResMan) handleCompletionMsg() {
-	ids := make([]int64, 0)
+	var ids []int64
 	mutex := sync.Mutex{}
 
 	// update the ids array when something arrives in completedChan

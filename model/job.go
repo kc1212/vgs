@@ -23,7 +23,7 @@ func filterJobs(s []Job, fn func(Job) bool) []Job {
 
 // takeJobs will take at most n jobs from channel `c`
 func takeJobs(n int, c <-chan Job) []Job {
-	jobs := make([]Job, 0)
+	var jobs []Job
 loop:
 	for i := 0; i < n; i++ {
 		select {

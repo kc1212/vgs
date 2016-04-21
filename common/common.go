@@ -78,12 +78,12 @@ func (v *SyncedVal) Geti64() int64 {
 }
 
 // Tick increments int64 value
-func (t *SyncedVal) Tick() {
-	x := t.Get().(int64) + 1
-	t.Set(x)
+func (v *SyncedVal) Tick() {
+	x := v.Get().(int64) + 1
+	v.Set(x)
 }
 
-// Max64 returns the bigger one
+// MaxInt64 returns the maximum of a and b
 func MaxInt64(a int64, b int64) int64 {
 	if a > b {
 		return a
@@ -231,7 +231,7 @@ func EmptyIntChan(c <-chan int) {
 
 // TakeAllInt64Chan returns a list with all the values in the buffered channel
 func TakeAllInt64Chan(c <-chan int64) []int64 {
-	res := make([]int64, 0)
+	var res []int64
 loop:
 	for {
 		select {

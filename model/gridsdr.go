@@ -47,6 +47,7 @@ type RPCArgs struct {
 	Clock int64
 }
 
+// GridSdrState is an RPC argument for synchronising states when GS first start up
 type GridSdrState struct {
 	IncomingJobs  []Job
 	ScheduledJobs []Job
@@ -125,7 +126,7 @@ func (gs *GridSdr) updateScheduledJobs() {
 				break
 			}
 			rms := gs.getAliveRMs()
-			toBeRescheduled := make([]Job, 0)
+			var toBeRescheduled []Job
 			for _, v := range gs.scheduledJobs {
 				if _, ok := rms[v.ResMan]; !ok {
 					toBeRescheduled = append(toBeRescheduled, v)
@@ -612,6 +613,7 @@ func (gs *GridSdr) AddJobs(jobs *[]Job, reply *int) error {
 	return nil
 }
 
+// RecvScheduledJobs RPC is for appending jobs to the scheduledJobs list
 // NOTE: this function should not be called directly by the client, it requires CS.
 func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
 	if !gs.ready.Get().(bool) {
@@ -628,6 +630,8 @@ func (gs *GridSdr) RecvScheduledJobs(jobs *[]Job, reply *int) error {
 	return nil
 }
 
+// RecvScheduledJobsFromRM RPC is for appending jobs to the scheduledJobs list but called by the RM
+// it needs to use the CS to sync the new jobs with the GS cluster
 func (gs *GridSdr) RecvScheduledJobsFromRM(jobs *[]Job, reply *int) error {
 	c := make(chan int)
 	gs.tasks <- func() (interface{}, error) {
@@ -645,6 +649,7 @@ func (gs *GridSdr) RecvScheduledJobsFromRM(jobs *[]Job, reply *int) error {
 	return nil
 }
 
+// DropJobs deletes the first n jobs from incomingJobs
 func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 	if !gs.ready.Get().(bool) {
 		str := fmt.Sprintf("Not dropping %v jobs because I'm not ready\n", *n)
@@ -728,6 +733,7 @@ func (gs *GridSdr) AddJobsViaUser(jobs *[]Job, reply *int) error {
 	return nil
 }
 
+// GetState RPC used by a GS when it first starts up to copy the job lists
 // TODO some repeated code in this function
 func (gs *GridSdr) GetState(x *int, state *GridSdrState) error {
 	// doesn't matter what x is
@@ -746,7 +752,7 @@ func (gs *GridSdr) GetState(x *int, state *GridSdrState) error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		jobs := make([]Job, 0)
+		var jobs []Job
 		for job := range incomingChan {
 			jobs = append(jobs, job)
 		}
@@ -757,7 +763,7 @@ func (gs *GridSdr) GetState(x *int, state *GridSdrState) error {
 	gs.scheduledJobReqChan <- scheduledChan
 	wg.Add(1)
 	go func() {
-		jobs := make([]Job, 0)
+		var jobs []Job
 		defer wg.Done()
 		for job := range scheduledChan {
 			jobs = append(jobs, job)

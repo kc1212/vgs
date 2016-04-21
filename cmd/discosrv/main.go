@@ -13,6 +13,6 @@ func main() {
 
 	flag.Parse()
 
-	ds := discosrv.DiscoSrv{}
+	ds := discosrv.Srv{}
 	ds.Run(*discorvAddr)
 }
