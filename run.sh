@@ -21,6 +21,8 @@ gs_end=$(printf "30%02d" "$1")
 rm_end=$(printf "31%02d" "$2")
 
 # set my address
+# alternatively we can set it automatically by using the following
+# dig +short myip.opendns.com @resolver1.opendns.com
 my_addr=localhost
 if [ -n "$3" ]; then
     my_addr="$3"

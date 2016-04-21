@@ -114,6 +114,10 @@ func (gs *GridSdr) Run() {
 }
 
 func (gs *GridSdr) updateScheduledJobs() {
+	totalDuration := float64(0)
+	totalWaitingTime := float64(0)
+	totalCompletedJobs := 0
+	reportingTimeout := time.After(5 * time.Second)
 	for {
 		timeout := time.After(100 * time.Millisecond)
 
@@ -135,11 +139,22 @@ func (gs *GridSdr) updateScheduledJobs() {
 			if len(toBeRescheduled) > 0 {
 				gs.rescheduleJobsAsTask(toBeRescheduled) // blocks
 			}
+
+		case <-reportingTimeout:
+			// the averge values only make sense when the duration for all the jobs are the same
+			log.Printf("Total job completed: %v, duration: %.2f/%.2f, waiting time: %.2f/%.2f\n", totalCompletedJobs,
+				totalDuration, totalDuration/float64(totalCompletedJobs),
+				totalWaitingTime, totalWaitingTime/float64(totalCompletedJobs))
+			reportingTimeout = time.After(5 * time.Second)
+
 		case job := <-gs.scheduledJobAddChan:
 			gs.scheduledJobs[job.ID] = job
 
 		case id := <-gs.scheduledJobRmChan:
-			// TODO log the finish time
+			dur := time.Now().Sub(gs.scheduledJobs[id].StartTime).Seconds()
+			totalDuration += dur
+			totalWaitingTime += (dur - gs.scheduledJobs[id].Duration.Seconds())
+			totalCompletedJobs++
 			delete(gs.scheduledJobs, id)
 
 		case c := <-gs.scheduledJobReqChan:
