@@ -7,11 +7,14 @@ import (
 
 import "github.com/kc1212/virtual-grid/common"
 
+// WorkerDone is indicating when a job is done, it's used in channels
 type WorkerDone struct {
 	jobID    int64
 	workerID int64
 }
 
+// WorkerTask represents a job/task that can be executed by a worker node
+// every Job (initially from the user) gets converted into a WorkerTask
 type WorkerTask struct {
 	task  common.Task
 	jobID int64

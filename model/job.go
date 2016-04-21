@@ -2,10 +2,11 @@ package model
 
 import "time"
 
+// Job are entities can be executed by worker nodes
 type Job struct {
 	ID         int64 // must be unique
 	Duration   time.Duration
-	ResMan     string // possibly improve the type?
+	ResMan     string
 	StartTime  time.Time
 	FinishTime time.Time
 }

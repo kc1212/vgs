@@ -11,6 +11,7 @@ import (
 	"sync"
 )
 
+// MsgType includes all messages types other than job list manipulation
 type MsgType int
 
 const (
@@ -23,6 +24,7 @@ const (
 	GetCapacityMsg
 )
 
+// MutexState are all the possible states for Ricart-Agrawala algorithm
 type MutexState int
 
 const (
@@ -38,6 +40,7 @@ type Node struct {
 	Type NodeType
 }
 
+// NodeType can be either for GS, RM or DS (discosrv)
 type NodeType int
 
 const (
@@ -46,63 +49,83 @@ const (
 	DSNode
 )
 
+// Task for running in CS or by a worker node
 type Task func() (interface{}, error)
 
+// SyncedVal is an interface{} with RWMutex
 type SyncedVal struct {
 	sync.RWMutex
 	V interface{}
 }
 
+// Set sets the value
 func (v *SyncedVal) Set(x interface{}) {
 	defer v.Unlock()
 	v.Lock()
 	v.V = x
 }
 
+// Get gets the value
 func (v *SyncedVal) Get() interface{} {
 	defer v.RUnlock()
 	v.RLock()
 	return v.V
 }
 
+// Geti64 is Get for int64
 func (v *SyncedVal) Geti64() int64 {
 	return v.Get().(int64)
 }
 
+// Tick increments int64 value
 func (t *SyncedVal) Tick() {
 	x := t.Get().(int64) + 1
 	t.Set(x)
 }
 
-func Max64(a int64, b int64) int64 {
+// Max64 returns the bigger one
+func MaxInt64(a int64, b int64) int64 {
 	if a > b {
 		return a
 	}
 	return b
 }
 
+// MinInt returns the minimum of a and b
+func MinInt(a int, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// IntClient stores an int64 ID and a Client pointer
 type IntClient struct {
 	Client *rpc.Client
 	ID     int64
 }
 
+// SyncedSet is a concurrent map
 type SyncedSet struct {
 	sync.RWMutex
 	S map[string]IntClient
 }
 
+// Set sets the value IntClient on key k
 func (s *SyncedSet) Set(k string, v IntClient) {
 	s.Lock()
 	defer s.Unlock()
 	s.S[k] = v
 }
 
+// SetInt is Set but only sets the int64 part of IntClient
 func (s *SyncedSet) SetInt(k string, v int64) {
 	s.Lock()
 	defer s.Unlock()
 	s.S[k] = IntClient{s.S[k].Client, v}
 }
 
+// Delete deletes entry at key k
 func (s *SyncedSet) Delete(k string) bool {
 	s.Lock()
 	defer s.Unlock()
@@ -114,6 +137,7 @@ func (s *SyncedSet) Delete(k string) bool {
 	return true
 }
 
+// Get gets value at key k
 func (s *SyncedSet) Get(k string) (v IntClient, ok bool) {
 	s.RLock()
 	defer s.RUnlock()
@@ -121,6 +145,7 @@ func (s *SyncedSet) Get(k string) (v IntClient, ok bool) {
 	return
 }
 
+// GetInt gets the int part of the value at key k
 func (s *SyncedSet) GetInt(k string) (int64, bool) {
 	s.RLock()
 	defer s.RUnlock()
@@ -128,21 +153,14 @@ func (s *SyncedSet) GetInt(k string) (int64, bool) {
 	return v.ID, ok
 }
 
+// GetAll does unwrapping
 func (s *SyncedSet) GetAll() map[string]IntClient {
 	s.RLock()
 	defer s.RUnlock()
 	return s.S
 }
 
-func SliceToMap(ss []string) map[string]IntClient {
-	m := make(map[string]IntClient)
-	for _, s := range ss {
-		m[s] = IntClient{}
-	}
-	return m
-}
-
-// runRPC registers and runs the RPC server.
+// RunRPC registers and runs the RPC server.
 func RunRPC(s interface{}, addr string) {
 	log.Printf("Initialising RPC on addr %v\n", addr)
 	rpc.Register(s)
@@ -155,6 +173,7 @@ func RunRPC(s interface{}, addr string) {
 	http.Serve(l, nil)
 }
 
+// RemoteCallNoFail does a remote.Call and logs failure
 func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply interface{}) error {
 	e := remote.Call(fn, args, reply)
 	if e != nil {
@@ -163,6 +182,7 @@ func RemoteCallNoFail(remote *rpc.Client, fn string, args interface{}, reply int
 	return e
 }
 
+// DialAndCallNoFail dial and then do the remote call
 // TODO is there a way to make the reply generic?
 func DialAndCallNoFail(addr string, fn string, args interface{}) (int, error) {
 	// var reply interface{}
@@ -177,6 +197,7 @@ func DialAndCallNoFail(addr string, fn string, args interface{}) (int, error) {
 	return reply, e2
 }
 
+// SliceFromMap does what it says
 func SliceFromMap(mymap map[string]IntClient) []string {
 	keys := make([]string, len(mymap))
 
@@ -188,6 +209,16 @@ func SliceFromMap(mymap map[string]IntClient) []string {
 	return keys
 }
 
+// SliceToMap is like the opposite of SliceFromMap
+func SliceToMap(ss []string) map[string]IntClient {
+	m := make(map[string]IntClient)
+	for _, s := range ss {
+		m[s] = IntClient{}
+	}
+	return m
+}
+
+// EmptyIntChan drops everything in channel c
 func EmptyIntChan(c <-chan int) {
 	for {
 		select {
@@ -211,11 +242,4 @@ loop:
 		}
 	}
 	return res
-}
-
-func MinInt(a int, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

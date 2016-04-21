@@ -565,7 +565,7 @@ func (gs *GridSdr) pollLeader() {
 func (gs *GridSdr) RecvMsg(args *RPCArgs, reply *int) error {
 	log.Printf("Msg received %v\n", *args)
 	*reply = 1
-	gs.clock.Set(common.Max64(gs.clock.Geti64(), args.Clock) + 1) // update Lamport clock
+	gs.clock.Set(common.MaxInt64(gs.clock.Geti64(), args.Clock) + 1) // update Lamport clock
 	if args.Type == common.CoordinateMsg {
 		gs.leader = args.Addr
 		log.Printf("Leader set to %v\n", gs.leader)
@@ -659,7 +659,7 @@ func (gs *GridSdr) DropJobs(n *int, reply *int) error {
 }
 
 // SyncCompletedJobs is called by the RM when job(s) are completed.
-// NOTE: it acquire a critical section and propogate the change to everybody.
+// NOTE: it acquire a critical section and propagate the change to everybody.
 func (gs *GridSdr) SyncCompletedJobs(jobs *[]int64, reply *int) error {
 	if !gs.ready.Get().(bool) {
 		str := fmt.Sprintf("Can't sync %v completed jobs because I'm not ready\n", len(*jobs))

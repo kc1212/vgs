@@ -10,6 +10,7 @@ import (
 import "github.com/kc1212/virtual-grid/common"
 import "github.com/kc1212/virtual-grid/discosrv"
 
+// ResMan the resource manager
 type ResMan struct {
 	common.Node
 	n             int // number of workers
@@ -22,6 +23,7 @@ type ResMan struct {
 	discosrvAddr  string
 }
 
+// InitResMan initialises and returns a ResMan
 func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 	return ResMan{
 		common.Node{ID: id, Addr: addr, Type: common.RMNode},
@@ -35,7 +37,7 @@ func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 		dsAddr}
 }
 
-// RunResMan is the main function, it starts all its services.
+// Run starts the ResMan
 func (rm *ResMan) Run() {
 	reply, e := discosrv.ImAliveProbe(rm.Addr, common.RMNode, rm.discosrvAddr)
 	if e != nil {
@@ -97,7 +99,7 @@ func (rm *ResMan) forwardJobs(jobs *[]Job) int {
 	return -1
 }
 
-// AddJob RPC call, only used by CLI
+// AddJobsViaUser PRC, only used by CLI
 func (rm *ResMan) AddJobsViaUser(jobs *[]Job, reply *int) error {
 	log.Printf("%v jobs received from user \n", len(*jobs))
 
@@ -116,7 +118,7 @@ func (rm *ResMan) AddJobsViaUser(jobs *[]Job, reply *int) error {
 	return nil
 }
 
-// AddJob RPC call, only used by GridSdr
+// AddJob RPC, only used by GridSdr
 func (rm *ResMan) AddJob(jobs *[]Job, reply *int) error {
 	log.Printf("%v jobs received \n", len(*jobs))
 

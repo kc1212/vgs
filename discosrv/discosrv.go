@@ -9,23 +9,27 @@ import (
 
 import "github.com/kc1212/virtual-grid/common"
 
+// DiscoSrv is the discovery server
 type DiscoSrv struct {
 	gsSet *common.SyncedSet
 	rmSet *common.SyncedSet
 }
 
+// DiscoSrvArgs is for RPC argument
 type DiscoSrvArgs struct {
 	Addr     string
 	Type     common.NodeType
 	NeedList bool
 }
 
+// DiscoSrvReply is for RPC responses
 type DiscoSrvReply struct {
 	GSs   []string
 	RMs   []string
 	Reply int
 }
 
+// Run runs the DiscoSrv
 func (ds *DiscoSrv) Run(addr string) {
 	ds.gsSet = &common.SyncedSet{S: make(map[string]common.IntClient)}
 	ds.rmSet = &common.SyncedSet{S: make(map[string]common.IntClient)}
@@ -33,6 +37,7 @@ func (ds *DiscoSrv) Run(addr string) {
 	ds.runRemoveDead()
 }
 
+// ImAlive RPC, called by GS or RM to update their status
 func (ds *DiscoSrv) ImAlive(args *DiscoSrvArgs, reply *DiscoSrvReply) error {
 	now := time.Now().Unix()
 	reply.Reply = 0
