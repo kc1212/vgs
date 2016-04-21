@@ -9,7 +9,7 @@ import (
 
 import "github.com/kc1212/virtual-grid/common"
 
-// DiscoSrv is the discovery server
+// Srv represents the discovery server
 type Srv struct {
 	gsSet *common.SyncedSet
 	rmSet *common.SyncedSet
@@ -105,7 +105,7 @@ func ImAliveProbe(nodeAddr string, nodeType common.NodeType, dsAddr string) (Rep
 		nodeAddr,
 		nodeType,
 		true}
-	e = common.RemoteCallNoFail(remote, "DiscoSrv.ImAlive", &args, &reply)
+	e = common.RemoteCallNoFail(remote, "Srv.ImAlive", &args, &reply)
 	return reply, e
 }
 
@@ -125,7 +125,7 @@ func ImAlivePoll(nodeAddr string, nodeType common.NodeType, dsAddr string) (Repl
 		false}
 	for {
 		// TODO check whether discosrv is still online, otherwise redail
-		common.RemoteCallNoFail(remote, "DiscoSrv.ImAlive", &args, &reply)
+		common.RemoteCallNoFail(remote, "Srv.ImAlive", &args, &reply)
 		time.Sleep(10 * time.Second)
 	}
 }

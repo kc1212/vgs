@@ -5,7 +5,7 @@ set -u
 
 function usage {
     echo "usage:"
-    echo "./kill.sh (gridsdr|resman) <id>"
+    echo "./kill.sh <gridsdr|resman> <id>"
 }
 
 if [ "$#" -ne 2 ]; then

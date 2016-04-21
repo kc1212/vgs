@@ -41,7 +41,7 @@ func InitResMan(n int, id int, addr string, dsAddr string) ResMan {
 func (rm *ResMan) Run() {
 	reply, e := discosrv.ImAliveProbe(rm.Addr, common.RMNode, rm.discosrvAddr)
 	if e != nil {
-		log.Panicf("Discosrv on %v not online\n", rm.discosrvAddr)
+		log.Panicf("Discosrv on %v not online: %v\n", rm.discosrvAddr, e.Error())
 	}
 	rm.notifyAndPopulateGSs(reply.GSs)
 

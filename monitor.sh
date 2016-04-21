@@ -5,7 +5,7 @@ set -u
 
 function usage {
     echo "usage:"
-    echo "./monitor.sh (gridsdr|resman) <id>"
+    echo "./monitor.sh <gridsdr|resman> <id>"
 }
 
 if [ "$#" -ne 2 ]; then
