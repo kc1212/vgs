@@ -526,7 +526,7 @@ func (gs *GridSdr) runTasks() {
 			gs.releaseCritSection()
 
 			// record the time spent in critical section
-			log.Printf("Spent %v in CS\n", time.Now().Sub(start))
+			log.Printf("Time spent in CS: %.4f\n", time.Now().Sub(start).Seconds())
 		}
 	}
 }
